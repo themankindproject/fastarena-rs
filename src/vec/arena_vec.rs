@@ -237,14 +237,14 @@ impl<'arena, T> ArenaVec<'arena, T> {
 
     /// Attempts to reserve capacity for at least `additional` more elements.
     ///
-    /// Unlike [`reserve`](ArenaVec::reserve), this returns an error instead of
+    /// Unlike [`reserve`](Self::reserve), this returns an error instead of
     /// panicking when memory cannot be allocated.
     ///
     /// # Errors
     ///
-    /// Returns [`TryReserveError::CapacityOverflow`] if the required capacity
-    /// would overflow `usize`. Returns [`TryReserveError::AllocError`] if the
-    /// arena is out of memory.
+    /// Returns [`CapacityOverflow`](TryReserveError::CapacityOverflow) if the
+    /// required capacity would overflow `usize`. Returns
+    /// [`AllocError`](TryReserveError::AllocError) if the arena is out of memory.
     ///
     /// # Example
     ///
