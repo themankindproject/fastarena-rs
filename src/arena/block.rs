@@ -17,6 +17,8 @@ pub(crate) struct Block {
     pub(crate) base: usize,
     /// Owning pointer for deallocation on drop.
     ptr: NonNull<u8>,
+    /// Cached Layout for deallocation (avoids repeated computation).
+    layout: Layout,
 }
 
 impl Block {
@@ -40,6 +42,7 @@ impl Block {
             base,
             capacity,
             offset: 0,
+            layout,
         })
     }
 
@@ -78,8 +81,7 @@ impl Block {
 
 impl Drop for Block {
     fn drop(&mut self) {
-        let layout = Layout::from_size_align(self.capacity, 8).unwrap();
-        unsafe { dealloc(self.ptr.as_ptr(), layout) };
+        unsafe { dealloc(self.ptr.as_ptr(), self.layout) };
     }
 }
 

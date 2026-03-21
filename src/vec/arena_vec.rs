@@ -142,6 +142,53 @@ impl<'arena, T> ArenaVec<'arena, T> {
         self.cap
     }
 
+    /// Reserves capacity for at least `additional` more elements.
+    ///
+    /// May panic if capacity overflows.
+    pub fn reserve(&mut self, additional: usize) {
+        let required = self.len.saturating_add(additional);
+        if required > self.cap {
+            self.grow_to(required);
+        }
+    }
+
+    /// Reserves exact capacity for `additional` elements.
+    ///
+    /// May panic if capacity overflows.
+    pub fn reserve_exact(&mut self, additional: usize) {
+        self.reserve(additional);
+    }
+
+    /// Tries to reserve capacity for at least `additional` more elements.
+    ///
+    /// Returns `Err` on allocation failure.
+    pub fn try_reserve(&mut self, additional: usize) -> Result<(), ()> {
+        let required = self.len.saturating_add(additional);
+        if required > self.cap {
+            self.try_grow_to(required)?;
+        }
+        Ok(())
+    }
+
+    fn try_grow_to(&mut self, new_cap: usize) -> Result<(), ()> {
+        if mem::size_of::<T>() == 0 {
+            self.cap = new_cap;
+            return Ok(());
+        }
+        let bytes = new_cap.checked_mul(mem::size_of::<T>()).ok_or(())?;
+        let raw = self
+            .arena
+            .try_alloc_raw(bytes, mem::align_of::<T>())
+            .ok_or(())?;
+        let new_ptr = raw.as_ptr() as *mut T;
+        if self.len > 0 {
+            unsafe { ptr::copy_nonoverlapping(self.ptr.as_ptr(), new_ptr, self.len) };
+        }
+        self.ptr = unsafe { NonNull::new_unchecked(new_ptr) };
+        self.cap = new_cap;
+        Ok(())
+    }
+
     #[inline(always)]
     pub fn as_slice(&self) -> &[T] {
         unsafe { std::slice::from_raw_parts(self.ptr.as_ptr() as *const T, self.len) }

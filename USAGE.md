@@ -306,6 +306,9 @@ pub fn push(&mut self, val: T)              // Amortized O(1)
 pub fn pop(&mut self) -> Option<T>
 pub fn extend(&mut self, iter: I)            // From ExactSizeIterator
 pub fn extend_from_slice(&mut self, slice: &[T]) where T: Copy
+pub fn reserve(&mut self, additional: usize)              // Reserve capacity
+pub fn reserve_exact(&mut self, additional: usize)       // Reserve exact capacity
+pub fn try_reserve(&mut self, additional: usize) -> Result<(), ()> // Fallible reserve
 pub fn len(&self) -> usize
 pub fn is_empty(&self) -> bool
 pub fn capacity(&self) -> usize
@@ -344,6 +347,27 @@ Efficiently copies elements from a slice using SIMD-optimized `memcpy`.
 let mut arena = Arena::new();
 let mut vec = ArenaVec::new(&mut arena);
 vec.extend_from_slice(&[1, 2, 3, 4, 5]);
+```
+
+#### Capacity Management
+
+```rust
+pub fn reserve(&mut self, additional: usize)      // Reserve for `additional` more elements
+pub fn reserve_exact(&mut self, additional: usize) // Reserve exact capacity
+pub fn try_reserve(&mut self, additional: usize) -> Result<(), ()> // Fallible variant
+```
+
+Pre-allocate capacity to avoid repeated growth:
+
+```rust
+let mut arena = Arena::new();
+let mut vec = ArenaVec::with_capacity(&mut arena, 0);
+vec.reserve(1000); // Pre-allocate for 1000 elements
+
+// Or try_reserve for fallible allocation
+if vec.try_reserve(10000).is_err() {
+    // Arena out of memory
+}
 ```
 
 ---
@@ -730,5 +754,5 @@ MIT — See [LICENSE](LICENSE) file.
 
 - [Crates.io](https://crates.io/crates/fastarena)
 - [Documentation](https://docs.rs/fastarena)
-- [Repository](https://github.com/themankindproject/fastarena)
+- [Repository](https://github.com/themankindproject/fastarena-rs)
 - [Changelog](CHANGELOG.md)
