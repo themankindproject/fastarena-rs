@@ -120,6 +120,65 @@ Initial release of fastarena, a high-performance bump-pointer arena allocator wi
 
 ---
 
-## Unreleased
+## [Unreleased]
 
-(No unreleased changes yet)
+### Added
+
+#### ArenaVec Methods
+- `ArenaVec::extend_from_slice()` - Efficiently copy from slice using SIMD-optimized memcpy
+- `ArenaVec::reserve()` - Pre-allocate capacity for additional elements
+- `ArenaVec::reserve_exact()` - Reserve exact capacity (no extra)
+- `ArenaVec::try_reserve()` - Fallible reserve that returns `Err` on allocation failure
+- `Extend<T>` trait implementation for `ArenaVec`
+
+#### Arena Methods
+- `Arena::new()` - Create arena with 64 KiB initial block
+- `Arena::with_capacity()` - Create arena with custom initial block size
+
+### Performance Optimizations
+
+- **Layout caching in Block** - Store `Layout` to avoid recomputation on `Drop`
+- **Simplified delta calculation** - Direct pointer arithmetic in `alloc_raw_inner`
+- **ManuallyDrop in Transaction::commit** - Prevents Drop while properly managing txn_depth
+- **set_current_block helper** - Eliminates duplicated cursor update code in reset/rewind
+- **saturating_add in InlineVec::push** - Cleaner overflow semantics
+- **Block::try_alloc overflow protection** - Use `checked_add` for safe arithmetic
+- **std::ptr::dangling_mut()** - Replace manual align_of pointer creation
+
+### Bug Fixes
+
+- **InlineVec::new()** - Fixed uninitialized read (UB) using `mem::zeroed()`
+- **ArenaVec::extend** - Cache `mem::size_of` to avoid repeated calls
+
+### Code Quality
+
+- **Clippy fixes** - All warnings resolved:
+  - `manual_dangling_ptr` → use `std::ptr::dangling_mut()`
+  - `unnecessary_map_or` → use `is_none_or()`
+  - `missing_safety_doc` → Added `# Safety` sections
+- **Feature-gated DropRegistry** - Field only exists when `drop-tracking` enabled
+
+### Documentation
+
+- **Updated README.md** with benchmark comparisons vs bumpalo/typed-arena
+- **Enhanced USAGE.md** with detailed explanations:
+  - Complete Arena API documentation
+  - ArenaVec growth strategy and capacity management
+  - Transaction patterns and use cases
+  - Updated benchmark results
+
+### Benchmarks
+
+Added comparison benchmarks (`benches/arena_comparison.rs`) vs popular arena allocators:
+
+| Benchmark | fastarena | bumpalo | typed-arena |
+|-----------|-----------|---------|-------------|
+| alloc_slice n=64 | **12 ns** | 49 ns | 72 ns |
+| alloc_slice n=1024 | **65 ns** | 510 ns | — |
+| ArenaVec n=4096 | **2.2 µs** | 8.2 µs | 10.0 µs |
+
+fastarena wins on slice/vector workloads due to batch write optimization.
+
+---
+
+## [0.1.0] - 2026-03-21
