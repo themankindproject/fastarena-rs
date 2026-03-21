@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rust: [stable, beta, nightly]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache target directory
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-target-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-target-${{ matrix.rust }}-
+            ${{ runner.os }}-target-
+
+      - name: Run tests (no features)
+        run: cargo test --lib
+
+      - name: Run tests (with drop-tracking)
+        run: cargo test --lib --features drop-tracking
+
+      - name: Run integration tests
+        run: cargo test --tests
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Build benchmarks
+        run: cargo build --release --benches
+
+      - name: Run clippy
+        run: cargo clippy --lib -- -D warnings
+
+      - name: Run rustfmt
+        run: cargo fmt --all -- --check
+
+  doc:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Build documentation
+        run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  bench:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Cache target directory
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-bench-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run benchmarks
+        run: cargo bench
+        timeout-minutes: 30

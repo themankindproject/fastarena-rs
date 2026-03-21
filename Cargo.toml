@@ -1,0 +1,60 @@
+[package]
+name         = "fastarena"
+version      = "0.1.0"
+edition      = "2021"
+authors      = ["Ashutosh Kumar <kumarashutosh34169@gmail.com>"]
+description  = "A zero-dependency, bump-pointer arena allocator with RAII transactions, nested savepoints, optional LIFO destructor tracking, and ArenaVec — built for compilers, storage engines, and high-throughput request-scoped workloads."
+license      = "MIT"
+repository   = "https://github.com/themankindproject/fastarena"
+homepage     = "https://github.com/themankindproject/fastarena"
+documentation = "https://docs.rs/fastarena"
+readme       = "README.md"
+keywords     = ["arena", "allocator", "bump", "memory", "no-std"]
+categories   = ["memory-management", "no-std", "data-structures"]
+exclude      = [
+    ".github/**",
+    "benches/**",
+    "examples/**",
+    "tests/**",
+    "*.sh",
+]
+
+[features]
+drop-tracking = []
+
+[profile.release]
+opt-level       = 3
+lto             = "fat"
+codegen-units   = 1
+panic           = "abort"
+strip           = "symbols"
+debug           = false
+overflow-checks = false
+
+[profile.dev]
+opt-level       = 0
+debug           = true
+overflow-checks = true
+
+[profile.test]
+opt-level       = 1
+debug           = true
+overflow-checks = true
+
+[profile.bench]
+inherits        = "release"
+debug           = true
+strip           = "none"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+bumpalo = "3"
+typed-arena = "2"
+
+[[bench]]
+name    = "arena_bench"
+harness = false
+
+[[bench]]
+name    = "arena_comparison"
+harness = false
