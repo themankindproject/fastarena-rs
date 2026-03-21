@@ -11,6 +11,7 @@ use crate::util::{
 #[cfg(feature = "drop-tracking")]
 use crate::util::drop_registry::DropRegistry;
 
+const MIN_BLOCK_SIZE: usize = 64;
 const DEFAULT_BLOCK_SIZE: usize = 64 * 1_024;
 const MAX_BLOCK_SIZE: usize = 16 * 1_024 * 1_024;
 const BLOCKS_INLINE_CAP: usize = 8;
@@ -93,7 +94,7 @@ impl Arena {
     /// Choose a value close to expected peak usage to avoid early block
     /// chaining.
     pub fn with_capacity(initial_bytes: usize) -> Self {
-        let size = initial_bytes.max(64);
+        let size = initial_bytes.max(MIN_BLOCK_SIZE);
         let block = Block::new(size);
         let base = block.base;
         let capacity = block.capacity;

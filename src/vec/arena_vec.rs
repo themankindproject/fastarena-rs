@@ -224,8 +224,9 @@ impl<'arena, T> ArenaVec<'arena, T> {
 
     /// Reserves exactly `additional` additional elements of capacity.
     ///
-    /// Unlike [`reserve`](ArenaVec::reserve), this will not allocate more than
-    /// strictly necessary. The final capacity will be exactly `len + additional`.
+    /// For arena-allocated vectors, this is identical to [`reserve`](Self::reserve)
+    /// since arena memory is not subject to fragmentation. The capacity may
+    /// exceed `len + additional` if the arena's growth strategy requires it.
     ///
     /// # Panics
     ///
@@ -362,6 +363,10 @@ impl<T> Drop for ArenaVec<'_, T> {
 }
 
 impl<'arena, T> Extend<T> for ArenaVec<'arena, T> {
+    /// Extends the vector by consuming items from the iterator one by one.
+    ///
+    /// This trait impl accepts any `IntoIterator`, unlike the [`extend`](ArenaVec::extend)
+    /// method which requires `ExactSizeIterator` to pre-allocate capacity.
     fn extend<I>(&mut self, iter: I)
     where
         I: IntoIterator<Item = T>,
