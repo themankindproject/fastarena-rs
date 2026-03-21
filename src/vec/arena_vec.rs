@@ -4,6 +4,12 @@ use std::ptr::{self, NonNull};
 
 use crate::arena::Arena;
 
+#[derive(Debug)]
+pub enum TryReserveError {
+    CapacityOverflow,
+    AllocError,
+}
+
 /// An append-only growable vector backed by arena memory.
 ///
 /// Elements 0..`capacity` are stored in a single arena allocation. Growth
@@ -162,7 +168,7 @@ impl<'arena, T> ArenaVec<'arena, T> {
     /// Tries to reserve capacity for at least `additional` more elements.
     ///
     /// Returns `Err` on allocation failure.
-    pub fn try_reserve(&mut self, additional: usize) -> Result<(), ()> {
+    pub fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
         let required = self.len.saturating_add(additional);
         if required > self.cap {
             self.try_grow_to(required)?;
@@ -170,16 +176,18 @@ impl<'arena, T> ArenaVec<'arena, T> {
         Ok(())
     }
 
-    fn try_grow_to(&mut self, new_cap: usize) -> Result<(), ()> {
+    fn try_grow_to(&mut self, new_cap: usize) -> Result<(), TryReserveError> {
         if mem::size_of::<T>() == 0 {
             self.cap = new_cap;
             return Ok(());
         }
-        let bytes = new_cap.checked_mul(mem::size_of::<T>()).ok_or(())?;
+        let bytes = new_cap
+            .checked_mul(mem::size_of::<T>())
+            .ok_or(TryReserveError::CapacityOverflow)?;
         let raw = self
             .arena
             .try_alloc_raw(bytes, mem::align_of::<T>())
-            .ok_or(())?;
+            .ok_or(TryReserveError::AllocError)?;
         let new_ptr = raw.as_ptr() as *mut T;
         if self.len > 0 {
             unsafe { ptr::copy_nonoverlapping(self.ptr.as_ptr(), new_ptr, self.len) };
