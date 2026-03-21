@@ -302,8 +302,10 @@ let mut vec = ArenaVec::with_capacity(&mut arena, 1000);
 #### Operations
 
 ```rust
-pub fn push(&mut self, val: T)      // Amortized O(1)
+pub fn push(&mut self, val: T)              // Amortized O(1)
 pub fn pop(&mut self) -> Option<T>
+pub fn extend(&mut self, iter: I)            // From ExactSizeIterator
+pub fn extend_from_slice(&mut self, slice: &[T]) where T: Copy
 pub fn len(&self) -> usize
 pub fn is_empty(&self) -> bool
 pub fn capacity(&self) -> usize
@@ -326,6 +328,22 @@ vec.push(1);
 vec.push(2);
 let slice = vec.finish();
 // slice is &mut [u32] owned by arena
+```
+
+#### `extend_from_slice()`
+
+```rust
+pub fn extend_from_slice(&mut self, slice: &[T])
+where
+    T: Copy,
+```
+
+Efficiently copies elements from a slice using SIMD-optimized `memcpy`.
+
+```rust
+let mut arena = Arena::new();
+let mut vec = ArenaVec::new(&mut arena);
+vec.extend_from_slice(&[1, 2, 3, 4, 5]);
 ```
 
 ---
@@ -565,14 +583,17 @@ for _ in 0..10 {
 
 ## Performance
 
-### Benchmarks
+### Benchmarks (vs bumpalo, typed-arena)
 
-| Operation | Time | vs Box/Vec |
-|-----------|------|------------|
-| `alloc u64` | ~1.7 µs | **10x faster** |
-| `alloc_slice n=64` | ~35 ns | **2x faster** |
-| `reset 1 block` | ~24 ns | — |
-| `10k allocs + reset` | ~17 ms | **10x faster** |
+| Benchmark | fastarena | bumpalo | typed-arena |
+|-----------|-----------|---------|-------------|
+| alloc 1k items | 1881 ns | 925 ns | 994 ns |
+| alloc_slice n=64 | **12 ns** | 49 ns | 72 ns |
+| ArenaVec n=4096 | **2.2 µs** | 8.2 µs | 10.0 µs |
+| 10k allocs + reset | 17.1 µs | 14.5 µs | 2.6 µs* |
+| large 128KB alloc | 59 ns | 27 ns | — |
+
+*typed-arena reallocates fresh each iteration; not comparable.
 
 ### Complexity
 

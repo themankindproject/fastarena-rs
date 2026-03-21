@@ -4,7 +4,7 @@
 [![Documentation](https://docs.rs/fastarena/badge.svg)](https://docs.rs/fastarena)
 [![License](https://img.shields.io/crates/l/fastarena)](LICENSE)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/themankindproject/fastarena-rs/ci.yml)](https://github.com/themankindproject/fastarena-rs/actions)
-![Rust Version](https://img.shields.io/badge/rust-1.70%2B-blue)
+![Rust Version](https://img.shields.io/badge/rust-1.66%2B-blue)
 
 A zero-dependency bump-pointer arena allocator with RAII transactions, nested savepoints, optional destructor tracking, and `ArenaVec` — built for compilers, storage engines, and high-throughput request-scoped workloads.
 
@@ -141,21 +141,22 @@ assert_eq!(slice[15], 225);
 
 | Benchmark | fastarena | bumpalo | typed-arena | Winner |
 |-----------|-----------|---------|-------------|--------|
-| alloc 1k items | 1063 ns | 878 ns | 1083 ns | bumpalo |
-| alloc_slice n=64 | **13 ns** | 52 ns | 88 ns | **fastarena** |
-| alloc_slice n=1024 | **70 ns** | 548 ns | — | **fastarena** |
-| ArenaVec n=256 | **187 ns** | 307 ns | 479 ns | **fastarena** |
-| ArenaVec n=4096 | **2.5 µs** | 9.0 µs | 11.0 µs | **fastarena** |
-| 10k allocs + reset | 16.5 µs | 14.5 µs | 2.6 µs | typed-arena* |
-| large 128KB alloc | 59 ns | 25 ns | — | bumpalo |
+| alloc 1k items | 1881 ns | 925 ns | 994 ns | bumpalo |
+| alloc_slice n=64 | **12 ns** | 49 ns | 72 ns | **fastarena** |
+| alloc_slice n=1024 | **65 ns** | 510 ns | — | **fastarena** |
+| ArenaVec n=256 | **174 ns** | 280 ns | 366 ns | **fastarena** |
+| ArenaVec n=4096 | **2.2 µs** | 8.2 µs | 10.0 µs | **fastarena** |
+| 10k allocs + reset | 17.1 µs | 14.5 µs | 2.6 µs | typed-arena* |
+| large 128KB alloc | 59 ns | 27 ns | — | bumpalo |
 
 *typed-arena reallocates fresh each iteration; not comparable.
 
 ### Why fastarena excels
 
 - **Slice allocation**: 4-8x faster than bumpalo due to batch `write()` in a tight loop
-- **ArenaVec**: 3-4x faster for building collections vs bumpalo Vec
+- **ArenaVec**: 3-4x faster for building collections vs bumpalo Vec  
 - **Cache locality**: Single bump pointer keeps allocations contiguous
+- **Zero dependencies**: No external crates required
 
 | Operation | Time | vs Box/Vec |
 |-----------|------|------------|
@@ -197,5 +198,5 @@ MIT — See [LICENSE](LICENSE) file.
 
 - [Crates.io](https://crates.io/crates/fastarena)
 - [Documentation](https://docs.rs/fastarena)
-- [Repository](https://github.com/themankindproject/fastarena)
+- [Repository](https://github.com/themankindproject/fastarena-rs)
 - [Changelog](CHANGELOG.md)
