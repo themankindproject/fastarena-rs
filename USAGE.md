@@ -89,6 +89,196 @@ assert_eq!(slice, &[1, 2, 3]);
 
 ## Core API
 
+### Arena
+
+The main bump-pointer allocator. Every allocation returns an exclusive reference to arena-allocated memory.
+
+**Key characteristics:**
+- **O(1) allocation**: Single bounds check + pointer advancement
+- **No deallocation**: Memory reclaimed in bulk via `reset()`
+- **Zero-cost reset**: Pages stay mapped, TLB-warm
+- **Block-based**: Automatically allocates new blocks when current is exhausted
+
+#### `new()`
+
+Creates an arena with a 64 KiB initial block. The default choice for most use cases:
+
+```rust
+let arena = Arena::new();
+```
+
+#### `with_capacity()`
+
+Creates an arena with a custom initial block size. **Recommended** when you know the expected peak memory usage:
+
+```rust
+// Pre-allocate 1MB for expected workload
+let arena = Arena::with_capacity(1024 * 1024);
+
+// Good for request-scoped allocation
+let arena = Arena::with_capacity(256 * 1024);
+```
+
+Choosing the right initial size avoids early block chaining (allocating multiple blocks).
+
+#### `alloc()`
+
+Allocates a value of type `T`, returning an exclusive reference. O(1) time complexity:
+
+```rust
+struct Point { x: f64, y: f64 }
+
+let mut arena = Arena::new();
+let p = arena.alloc(Point { x: 1.0, y: 2.0 });
+p.x = 3.0; // Mutable access to arena-allocated data
+```
+
+**Note:** Without `drop-tracking` feature, the destructor of `T` is never called automatically.
+
+#### `alloc_slice()`
+
+Allocates a contiguous slice from an `ExactSizeIterator`. Optimized for bulk allocation - 4-8x faster than bumpalo for slice allocation:
+
+```rust
+let mut arena = Arena::new();
+
+// From range (ExactSizeIterator)
+let slice = arena.alloc_slice(0u32..100);
+assert_eq!(slice.len(), 100);
+
+// From iterator
+let squares: &[u32] = arena.alloc_slice((0..10).map(|n| n * n));
+```
+
+#### `alloc_str()`
+
+Copies a string slice into the arena. Internally uses SIMD-optimized memcpy:
+
+```rust
+let mut arena = Arena::new();
+let s = arena.alloc_str("hello world");
+assert_eq!(s, "hello world");
+```
+
+#### `alloc_uninit()`
+
+Allocates space for `T` without initializing it. Useful for FFI or performance-critical code:
+
+```rust
+let mut arena = Arena::new();
+let slot = arena.alloc_uninit::<u64>();
+slot.write(42); // Initialize with write()
+let val: &u64 = unsafe { slot.assume_init_ref() };
+```
+
+#### Low-level Allocation
+
+**`alloc_raw(size, align)`** - Allocate raw bytes with specific alignment:
+
+```rust
+let ptr = arena.alloc_raw(64, 64); // 64-byte aligned
+```
+
+**`alloc_zeroed(size, align)`** - Allocate zeroed memory:
+
+```rust
+let ptr = arena.alloc_zeroed(128, 8);
+```
+
+**`alloc_cache_aligned(size)`** - Allocate cache-line aligned (64 bytes) for SIMD:
+
+```rust
+let simd_buffer = arena.alloc_cache_aligned(256);
+```
+
+#### Fallible Allocation
+
+All allocation methods have fallible counterparts that return `None` instead of panicking:
+
+```rust
+pub fn try_alloc<T>(&mut self, val: T) -> Option<&mut T>
+pub fn try_alloc_slice<T, I>(&mut self, iter: I) -> Option<&mut [T]>
+pub fn try_alloc_str(&mut self, s: &str) -> Option<&str>
+pub fn try_alloc_raw(&mut self, size: usize, align: usize) -> Option<NonNull<u8>>
+```
+
+```rust
+let mut arena = Arena::with_capacity(64); // Small arena
+
+if let Some(value) = arena.try_alloc(42) {
+    // Success - allocation fit
+} else {
+    // Out of memory
+}
+```
+
+#### `reset()`
+
+Resets the entire arena, making all memory available for reuse. **Zero-cost**: no OS calls, pages stay mapped, TLB entries remain warm:
+
+```rust
+let mut arena = Arena::new();
+for _ in 0..1000 {
+    arena.alloc(42u64);
+}
+// ... use allocations ...
+arena.reset(); // All memory available again
+arena.stats().bytes_allocated == 0
+```
+
+#### `checkpoint()` / `rewind()`
+
+Snapshot and rollback allocations without full reset. Useful for speculative operations:
+
+```rust
+let mut arena = Arena::new();
+arena.alloc(1);
+
+let cp = arena.checkpoint(); // Save point
+arena.alloc(2);
+arena.alloc(3);
+arena.rewind(cp); // Roll back 2 and 3
+
+// Only allocation 1 remains
+```
+
+**Behavior:**
+- Checkpoint captures current position (block index + offset)
+- Rewind restores position and resets subsequent blocks
+- No OS calls - blocks are reused
+- With `drop-tracking`: destructors run in LIFO order
+
+#### `transaction()`
+
+Opens a transactional scope with automatic rollback on drop:
+
+```rust
+let mut arena = Arena::new();
+{
+    let mut txn = arena.transaction();
+    txn.alloc(1);
+    txn.alloc(2);
+    txn.commit(); // Keep allocations
+}
+// Or drop without commit to rollback
+```
+
+#### `stats()`
+
+Returns memory usage snapshot in O(1) time:
+
+```rust
+let arena = Arena::new();
+let stats = arena.stats();
+
+println!("Allocated: {} bytes", stats.bytes_allocated);  // In-use
+println!("Reserved: {} bytes", stats.bytes_reserved);    // Total reserved
+println!("Blocks: {}", stats.block_count);               // Block count
+println!("Utilization: {:.1}%", stats.utilization() * 100.0);
+```
+
+---
+
 ### ArenaVec
 
 An append-only growable vector backed by arena memory. Similar API to `std::Vec` but backed by arena allocation for O(1) push and zero-cost bulk reclamation.
