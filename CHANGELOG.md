@@ -59,9 +59,18 @@ Initial release of fastarena, a high-performance bump-pointer arena allocator wi
 - `ArenaVec::push()` - Append elements with amortised O(1) complexity
 - `ArenaVec::pop()` - Remove and return the last element
 - `ArenaVec::extend()` - Append all items from an iterator
+- `ArenaVec::extend_from_slice()` - Efficiently copy from slice using SIMD-optimized memcpy
+- `ArenaVec::reserve()` - Pre-allocate capacity for additional elements
+- `ArenaVec::reserve_exact()` - Reserve exact capacity (no extra)
+- `ArenaVec::try_reserve()` - Fallible reserve that returns `Err` on allocation failure
 - `ArenaVec::finish()` - Transfer ownership to arena, returning `&'arena mut [T]`
 - `ArenaVec::as_slice()` / `ArenaVec::as_mut_slice()` - Borrow as slice
 - Indexing via `Index` and `IndexMut` traits
+- `Extend<T>` trait implementation for `ArenaVec`
+
+#### Arena Methods
+- `Arena::new()` - Create arena with 64 KiB initial block
+- `Arena::with_capacity()` - Create arena with custom initial block size
 
 #### Feature Flags
 - `drop-tracking` - Opt-in destructor execution on `reset()` / `rewind()` in LIFO order
@@ -115,25 +124,8 @@ Initial release of fastarena, a high-performance bump-pointer arena allocator wi
 
 ### System Requirements
 
-- Rust 1.65+ (edition 2021)
+- Rust 1.66+ (edition 2021)
 - Tested on Linux (x86-64, ARM64)
-
----
-
-## [Unreleased]
-
-### Added
-
-#### ArenaVec Methods
-- `ArenaVec::extend_from_slice()` - Efficiently copy from slice using SIMD-optimized memcpy
-- `ArenaVec::reserve()` - Pre-allocate capacity for additional elements
-- `ArenaVec::reserve_exact()` - Reserve exact capacity (no extra)
-- `ArenaVec::try_reserve()` - Fallible reserve that returns `Err` on allocation failure
-- `Extend<T>` trait implementation for `ArenaVec`
-
-#### Arena Methods
-- `Arena::new()` - Create arena with 64 KiB initial block
-- `Arena::with_capacity()` - Create arena with custom initial block size
 
 ### Performance Optimizations
 
@@ -180,5 +172,3 @@ Added comparison benchmarks (`benches/arena_comparison.rs`) vs popular arena all
 fastarena wins on slice/vector workloads due to batch write optimization.
 
 ---
-
-## [0.1.0] - 2026-03-21

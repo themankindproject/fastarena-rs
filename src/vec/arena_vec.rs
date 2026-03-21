@@ -92,7 +92,23 @@ impl<'arena, T> ArenaVec<'arena, T> {
         Some(unsafe { self.ptr.as_ptr().add(self.len).read() })
     }
 
+    /// Remove all elements from the vector without freeing memory.
+    ///
+    /// Element destructors are run if `T: Drop`. Capacity is preserved.
+    #[inline]
+    pub fn clear(&mut self) {
+        if mem::needs_drop::<T>() {
+            for i in 0..self.len {
+                unsafe { ptr::drop_in_place(self.ptr.as_ptr().add(i)) }
+            }
+        }
+        self.len = 0;
+    }
+
     /// Append all items from `iter`.
+    ///
+    /// Requires `ExactSizeIterator` to pre-compute capacity and avoid repeated
+    /// reallocation during growth.
     #[inline]
     pub fn extend<I>(&mut self, iter: I)
     where
@@ -353,6 +369,46 @@ impl<'arena, T> Extend<T> for ArenaVec<'arena, T> {
         for item in iter {
             self.push(item);
         }
+    }
+}
+
+impl<'arena, T> IntoIterator for ArenaVec<'arena, T> {
+    type Item = T;
+    type IntoIter = ArenaVecIntoIter<'arena, T>;
+    fn into_iter(self) -> Self::IntoIter {
+        ArenaVecIntoIter { inner: self }
+    }
+}
+
+pub struct ArenaVecIntoIter<'arena, T> {
+    inner: ArenaVec<'arena, T>,
+}
+
+impl<'arena, T> Iterator for ArenaVecIntoIter<'arena, T> {
+    type Item = T;
+    fn next(&mut self) -> Option<T> {
+        self.inner.pop()
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.inner.len(), Some(self.inner.len()))
+    }
+}
+
+impl<'arena, T> ExactSizeIterator for ArenaVecIntoIter<'arena, T> {}
+
+impl<'arena, T> IntoIterator for &'arena ArenaVec<'arena, T> {
+    type Item = &'arena T;
+    type IntoIter = std::slice::Iter<'arena, T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.as_slice().iter()
+    }
+}
+
+impl<'arena, T> IntoIterator for &'arena mut ArenaVec<'arena, T> {
+    type Item = &'arena mut T;
+    type IntoIter = std::slice::IterMut<'arena, T>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.as_mut_slice().iter_mut()
     }
 }
 

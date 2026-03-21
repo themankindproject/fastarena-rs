@@ -46,7 +46,7 @@ pub struct Transaction<'arena> {
     committed: bool,
     bytes_at_open: usize,
     block_at_open: usize,
-    pub depth: usize,
+    depth: usize,
     limit: Option<usize>,
 }
 
