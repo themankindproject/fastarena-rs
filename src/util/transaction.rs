@@ -1,4 +1,5 @@
 use std::mem::{self, ManuallyDrop};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr::NonNull;
 
 use crate::arena::{Arena, Checkpoint, CACHE_LINE_SIZE};
@@ -77,7 +78,7 @@ impl<'arena> Transaction<'arena> {
         let this = ManuallyDrop::new(self);
         unsafe {
             let arena_ptr: *mut Arena = this.arena as *const _ as *mut _;
-            (*arena_ptr).txn_depth = (*arena_ptr).txn_depth.saturating_sub(1);
+            (*arena_ptr).txn_depth = (*arena_ptr).txn_depth.wrapping_sub(1);
         }
         TxnStatus::Committed
     }
@@ -181,6 +182,9 @@ impl<'arena> Transaction<'arena> {
 }
 
 impl<'arena> Transaction<'arena> {
+    /// Allocate a value of type `T` into the arena.
+    ///
+    /// See [`Arena::alloc`] for details.
     #[inline]
     pub fn alloc<T>(&mut self, val: T) -> &mut T {
         if !self.budget_ok(mem::size_of::<T>()) {
@@ -189,6 +193,9 @@ impl<'arena> Transaction<'arena> {
         self.arena.alloc(val)
     }
 
+    /// Allocate a contiguous slice from an `ExactSizeIterator`.
+    ///
+    /// See [`Arena::alloc_slice`] for details.
     #[inline]
     pub fn alloc_slice<T, I>(&mut self, iter: I) -> &mut [T]
     where
@@ -203,6 +210,9 @@ impl<'arena> Transaction<'arena> {
         self.arena.alloc_slice(iter)
     }
 
+    /// Copy a string slice into the arena.
+    ///
+    /// See [`Arena::alloc_str`] for details.
     #[inline]
     pub fn alloc_str(&mut self, s: &str) -> &str {
         if !self.budget_ok(s.len()) {
@@ -211,6 +221,9 @@ impl<'arena> Transaction<'arena> {
         self.arena.alloc_str(s)
     }
 
+    /// Allocate uninitialised space for a `T`.
+    ///
+    /// See [`Arena::alloc_uninit`] for details.
     #[inline]
     pub fn alloc_uninit<T>(&mut self) -> &mut std::mem::MaybeUninit<T> {
         if !self.budget_ok(mem::size_of::<T>()) {
@@ -219,6 +232,9 @@ impl<'arena> Transaction<'arena> {
         self.arena.alloc_uninit::<T>()
     }
 
+    /// Allocate `size` bytes with `align` alignment, zeroed.
+    ///
+    /// See [`Arena::alloc_zeroed`] for details.
     #[inline]
     pub fn alloc_zeroed(&mut self, size: usize, align: usize) -> NonNull<u8> {
         if !self.budget_ok(size) {
@@ -227,6 +243,9 @@ impl<'arena> Transaction<'arena> {
         self.arena.alloc_zeroed(size, align)
     }
 
+    /// Allocate `size` bytes aligned to a 64-byte cache line.
+    ///
+    /// See [`Arena::alloc_cache_aligned`] for details.
     #[inline]
     pub fn alloc_cache_aligned(&mut self, size: usize) -> NonNull<u8> {
         if !self.budget_ok(size) {
@@ -235,6 +254,9 @@ impl<'arena> Transaction<'arena> {
         self.arena.alloc_raw(size, CACHE_LINE_SIZE)
     }
 
+    /// Low-level allocation of `size` uninitialised bytes at `align` alignment.
+    ///
+    /// See [`Arena::alloc_raw`] for details.
     #[inline]
     pub fn alloc_raw(&mut self, size: usize, align: usize) -> NonNull<u8> {
         if !self.budget_ok(size) {
@@ -243,6 +265,9 @@ impl<'arena> Transaction<'arena> {
         self.arena.alloc_raw(size, align)
     }
 
+    /// Fallible allocation of a value of type `T`. Returns `None` on OOM.
+    ///
+    /// See [`Arena::try_alloc`] for details.
     #[inline]
     pub fn try_alloc<T>(&mut self, val: T) -> Option<&mut T> {
         if !self.budget_ok(mem::size_of::<T>()) {
@@ -251,6 +276,9 @@ impl<'arena> Transaction<'arena> {
         self.arena.try_alloc(val)
     }
 
+    /// Fallible slice allocation. Returns `None` on OOM.
+    ///
+    /// See [`Arena::try_alloc_slice`] for details.
     #[inline]
     pub fn try_alloc_slice<T, I>(&mut self, iter: I) -> Option<&mut [T]>
     where
@@ -265,6 +293,9 @@ impl<'arena> Transaction<'arena> {
         self.arena.try_alloc_slice(iter)
     }
 
+    /// Fallible string allocation. Returns `None` on OOM.
+    ///
+    /// See [`Arena::try_alloc_str`] for details.
     #[inline]
     pub fn try_alloc_str(&mut self, s: &str) -> Option<&str> {
         if !self.budget_ok(s.len()) {
@@ -273,6 +304,9 @@ impl<'arena> Transaction<'arena> {
         self.arena.try_alloc_str(s)
     }
 
+    /// Fallible raw allocation. Returns `None` on OOM.
+    ///
+    /// See [`Arena::try_alloc_raw`] for details.
     #[inline]
     pub fn try_alloc_raw(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
         if !self.budget_ok(size) {
@@ -291,6 +325,24 @@ impl Drop for Transaction<'_> {
     }
 }
 
+/// Execute a closure within a transaction on the given arena.
+///
+/// The closure receives a mutable [`Transaction`] guard. If the closure returns
+/// `Ok`, the transaction commits and all allocations are kept. If the closure
+/// returns `Err`, the transaction rolls back automatically.
+///
+/// # Example
+///
+/// ```rust
+/// use fastarena::Arena;
+///
+/// let mut arena = Arena::new();
+/// let result: Result<u32, &str> = arena.with_transaction(|txn| {
+///     txn.alloc(42u32);
+///     Ok(*txn.alloc(1u32))
+/// });
+/// assert_eq!(result, Ok(1));
+/// ```
 pub fn run_with_transaction<'arena, F, T, E>(arena: &'arena mut Arena, f: F) -> Result<T, E>
 where
     F: FnOnce(&mut Transaction<'arena>) -> Result<T, E>,
@@ -305,12 +357,31 @@ where
     }
 }
 
+/// Execute an infallible closure within a transaction on the given arena.
+///
+/// Unlike [`run_with_transaction`], this function always commits, even if the
+/// closure panics. The panic is propagated after rollback completes.
+///
+/// # Example
+///
+/// ```rust
+/// use fastarena::Arena;
+///
+/// let mut arena = Arena::new();
+/// let value = arena.with_transaction_infallible(|txn| {
+///     *txn.alloc(10u32) + *txn.alloc(20u32)
+/// });
+/// assert_eq!(value, 30);
+/// ```
 pub fn run_with_transaction_infallible<'arena, F, T>(arena: &'arena mut Arena, f: F) -> T
 where
     F: FnOnce(&mut Transaction<'arena>) -> T,
 {
     let mut txn = Transaction::new(arena);
-    let result = f(&mut txn);
+    let result = catch_unwind(AssertUnwindSafe(|| f(&mut txn)));
     txn.commit();
-    result
+    match result {
+        Ok(val) => val,
+        Err(payload) => std::panic::panic_any(payload),
+    }
 }

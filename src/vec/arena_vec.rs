@@ -4,9 +4,12 @@ use std::ptr::{self, NonNull};
 
 use crate::arena::Arena;
 
+/// Error returned by [`ArenaVec::try_reserve`] when allocation fails.
 #[derive(Debug)]
 pub enum TryReserveError {
+    /// Computed capacity would overflow `usize`.
     CapacityOverflow,
+    /// The arena is out of memory.
     AllocError,
 }
 
@@ -114,7 +117,25 @@ impl<'arena, T> ArenaVec<'arena, T> {
         }
     }
 
-    /// Extend from an existing slice by copying its elements.
+    /// Copies elements from a slice into the vector.
+    ///
+    /// This is more efficient than `extend` when the source is already a slice,
+    /// as it can use a single `memcpy`-style copy via `ptr::copy_nonoverlapping`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new length exceeds the arena's capacity.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut v = ArenaVec::new(&mut arena);
+    /// v.extend_from_slice(&[1u32, 2, 3, 4]);
+    /// assert_eq!(v.as_slice(), &[1, 2, 3, 4]);
+    /// ```
     #[inline]
     pub fn extend_from_slice(&mut self, slice: &[T])
     where
@@ -135,22 +156,49 @@ impl<'arena, T> ArenaVec<'arena, T> {
         self.len = new_len;
     }
 
+    /// Returns the number of elements in the vector.
     #[inline(always)]
     pub fn len(&self) -> usize {
         self.len
     }
+
+    /// Returns `true` if the vector contains no elements.
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
+
+    /// Returns the current capacity of the vector.
+    ///
+    /// Capacity is the number of elements the vector can hold without
+    /// reallocating. For ZSTs (zero-sized types), capacity is tracked
+    /// independently of actual memory.
     #[inline]
     pub fn capacity(&self) -> usize {
         self.cap
     }
 
-    /// Reserves capacity for at least `additional` more elements.
+    /// Reserves capacity for at least `additional` more elements in the vector.
     ///
-    /// May panic if capacity overflows.
+    /// After calling `reserve`, the vector will have capacity for at least
+    /// `self.len() + additional` elements without reallocating. This does not
+    /// change the vector's length.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new capacity overflows `usize`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut v = ArenaVec::new(&mut arena);
+    /// v.push(1u32);
+    /// v.reserve(10);
+    /// assert!(v.capacity() >= 11);
+    /// ```
     pub fn reserve(&mut self, additional: usize) {
         let required = self.len.saturating_add(additional);
         if required > self.cap {
@@ -158,16 +206,38 @@ impl<'arena, T> ArenaVec<'arena, T> {
         }
     }
 
-    /// Reserves exact capacity for `additional` elements.
+    /// Reserves exactly `additional` additional elements of capacity.
     ///
-    /// May panic if capacity overflows.
+    /// Unlike [`reserve`](ArenaVec::reserve), this will not allocate more than
+    /// strictly necessary. The final capacity will be exactly `len + additional`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new capacity overflows `usize`.
     pub fn reserve_exact(&mut self, additional: usize) {
         self.reserve(additional);
     }
 
-    /// Tries to reserve capacity for at least `additional` more elements.
+    /// Attempts to reserve capacity for at least `additional` more elements.
     ///
-    /// Returns `Err` on allocation failure.
+    /// Unlike [`reserve`](ArenaVec::reserve), this returns an error instead of
+    /// panicking when memory cannot be allocated.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TryReserveError::CapacityOverflow`] if the required capacity
+    /// would overflow `usize`. Returns [`TryReserveError::AllocError`] if the
+    /// arena is out of memory.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut v: ArenaVec<u32> = ArenaVec::new(&mut arena);
+    /// assert!(v.try_reserve(100).is_ok());
+    /// ```
     pub fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError> {
         let required = self.len.saturating_add(additional);
         if required > self.cap {
@@ -197,11 +267,17 @@ impl<'arena, T> ArenaVec<'arena, T> {
         Ok(())
     }
 
+    /// Returns a slice view of the vector's current contents.
+    ///
+    /// The slice length equals `self.len()` at the time of the call.
     #[inline(always)]
     pub fn as_slice(&self) -> &[T] {
         unsafe { std::slice::from_raw_parts(self.ptr.as_ptr() as *const T, self.len) }
     }
 
+    /// Returns a mutable slice view of the vector's current contents.
+    ///
+    /// The slice length equals `self.len()` at the time of the call.
     #[inline(always)]
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
@@ -216,7 +292,13 @@ impl<'arena, T> ArenaVec<'arena, T> {
     }
 
     fn grow(&mut self) {
-        let new_cap = if self.cap == 0 { 4 } else { self.cap * 2 };
+        let new_cap = if self.cap == 0 {
+            4
+        } else {
+            self.cap
+                .checked_mul(2)
+                .expect("ArenaVec: capacity overflow")
+        };
         self.grow_to(new_cap);
     }
 
