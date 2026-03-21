@@ -89,240 +89,53 @@ assert_eq!(slice, &[1, 2, 3]);
 
 ## Core API
 
-### Arena
-
-The main bump-pointer allocator. Every allocation returns an exclusive reference to arena-allocated memory.
-
-#### `new()`
-
-```rust
-pub fn new() -> Self
-```
-
-Creates an arena with a 64 KiB initial block.
-
-```rust
-let arena = Arena::new();
-```
-
-#### `with_capacity()`
-
-```rust
-pub fn with_capacity(initial_bytes: usize) -> Self
-```
-
-Creates an arena with a custom initial block size. Choose a value close to expected peak usage to avoid early block chaining.
-
-```rust
-// Pre-allocate 1MB for expected workload
-let arena = Arena::with_capacity(1024 * 1024);
-```
-
-#### `alloc()`
-
-```rust
-pub fn alloc<T>(&mut self, val: T) -> &mut T
-```
-
-Allocates a value of type `T`, returning an exclusive reference.
-
-**Note:** Without `drop-tracking`, the destructor of `T` is never called.
-
-```rust
-struct Point { x: f64, y: f64 }
-
-let mut arena = Arena::new();
-let p = arena.alloc(Point { x: 1.0, y: 2.0 });
-p.x = 3.0;
-```
-
-#### `alloc_slice()`
-
-```rust
-pub fn alloc_slice<T, I>(&mut self, iter: I) -> &mut [T]
-where
-    I: IntoIterator<Item = T>,
-    I::IntoIter: ExactSizeIterator,
-```
-
-Allocates a contiguous slice from an `ExactSizeIterator`.
-
-```rust
-let mut arena = Arena::new();
-let slice = arena.alloc_slice(0u32..100);
-assert_eq!(slice.len(), 100);
-```
-
-#### `alloc_str()`
-
-```rust
-pub fn alloc_str(&mut self, s: &str) -> &str
-```
-
-Copies a string slice into the arena using SIMD-optimized `memcpy`.
-
-```rust
-let mut arena = Arena::new();
-let s = arena.alloc_str("embedded string");
-```
-
-#### `alloc_uninit()`
-
-```rust
-pub fn alloc_uninit<T>(&mut self) -> &mut MaybeUninit<T>
-```
-
-Allocates space for `T` without initializing it. Caller must fully initialize before observation.
-
-```rust
-let mut arena = Arena::new();
-let slot = arena.alloc_uninit::<u64>();
-slot.write(42);
-let val: &u64 = unsafe { slot.assume_init_ref() };
-assert_eq!(*val, 42);
-```
-
-#### `alloc_raw()`, `alloc_zeroed()`, `alloc_cache_aligned()`
-
-Low-level allocation methods for custom size/alignment requirements.
-
-```rust
-let mut arena = Arena::new();
-
-// Raw bytes with alignment
-let ptr = arena.alloc_raw(64, 64); // 64-byte aligned
-
-// Zeroed memory
-let ptr = arena.alloc_zeroed(128, 8);
-
-// Cache-line aligned (64 bytes) for SIMD
-let simd_buffer = arena.alloc_cache_aligned(256);
-```
-
-#### Fallible Allocation
-
-```rust
-pub fn try_alloc<T>(&mut self, val: T) -> Option<&mut T>
-pub fn try_alloc_slice<T, I>(&mut self, iter: I) -> Option<&mut [T]>
-pub fn try_alloc_str(&mut self, s: &str) -> Option<&str>
-pub fn try_alloc_raw(&mut self, size: usize, align: usize) -> Option<NonNull<u8>>
-```
-
-Fallible variants that return `None` on OOM instead of panicking.
-
-```rust
-let mut arena = Arena::new();
-if let Some(value) = arena.try_alloc(42) {
-    // Success
-}
-```
-
-#### `reset()`
-
-```rust
-pub fn reset(&mut self)
-```
-
-Resets the entire arena. No memory is freed — OS pages stay mapped and TLB-warm. With `drop-tracking`, destructors run first.
-
-```rust
-let mut arena = Arena::new();
-// ... allocations ...
-arena.reset(); // All memory available again
-```
-
-#### `checkpoint()` / `rewind()`
-
-```rust
-pub fn checkpoint(&self) -> Checkpoint
-pub fn rewind(&mut self, cp: Checkpoint)
-```
-
-Snapshot and rollback allocations.
-
-```rust
-let mut arena = Arena::new();
-arena.alloc(1);
-let cp = arena.checkpoint();
-arena.alloc(2);
-arena.alloc(3);
-arena.rewind(cp);
-// Now only allocation 1 remains
-```
-
-#### `transaction()`
-
-```rust
-pub fn transaction(&mut self) -> Transaction<'_>
-```
-
-Opens a transactional scope with auto-rollback on drop.
-
-```rust
-let mut arena = Arena::new();
-{
-    let mut txn = arena.transaction();
-    txn.alloc(1);
-    txn.commit();
-}
-```
-
-#### `stats()`
-
-```rust
-pub fn stats(&self) -> ArenaStats
-```
-
-Returns memory usage snapshot. O(1).
-
-```rust
-let arena = Arena::new();
-let stats = arena.stats();
-println!("Allocated: {} bytes", stats.bytes_allocated);
-println!("Reserved: {} bytes", stats.bytes_reserved);
-println!("Blocks: {}", stats.block_count);
-```
-
----
-
 ### ArenaVec
 
-An append-only growable vector backed by arena memory.
+An append-only growable vector backed by arena memory. Similar API to `std::Vec` but backed by arena allocation for O(1) push and zero-cost bulk reclamation.
+
+**Key differences from `Vec`:**
+- `finish()` transfers ownership to arena without running destructors
+- No individual element deallocation (append-only)
+- Memory reclaimed in bulk via `arena.reset()`
+- Can grow beyond arena's current block size automatically
 
 #### Creation
 
-```rust
-// Empty vector - no allocation until first push
-let mut vec = ArenaVec::new(&mut arena);
+**`ArenaVec::new()`** creates an empty vector with no initial allocation. Memory is allocated on first `push`:
 
-// Pre-allocated
+```rust
+let mut vec = ArenaVec::new(&mut arena);
+// No allocation yet
+vec.push(1); // First allocation happens here
+```
+
+**`ArenaVec::with_capacity()`** pre-allocates space for a known number of elements, avoiding growth copies:
+
+```rust
 let mut vec = ArenaVec::with_capacity(&mut arena, 1000);
+// Space for 1000 elements pre-allocated
 ```
 
 #### Operations
 
-```rust
-pub fn push(&mut self, val: T)              // Amortized O(1)
-pub fn pop(&mut self) -> Option<T>
-pub fn extend(&mut self, iter: I)            // From ExactSizeIterator
-pub fn extend_from_slice(&mut self, slice: &[T]) where T: Copy
-pub fn reserve(&mut self, additional: usize)              // Reserve capacity
-pub fn reserve_exact(&mut self, additional: usize)       // Reserve exact capacity
-pub fn try_reserve(&mut self, additional: usize) -> Result<(), ()> // Fallible reserve
-pub fn len(&self) -> usize
-pub fn is_empty(&self) -> bool
-pub fn capacity(&self) -> usize
-pub fn as_slice(&self) -> &[T]
-pub fn as_mut_slice(&mut self) -> &mut [T]
-```
+| Method | Description |
+|--------|-------------|
+| `push(val)` | Appends element. Amortized O(1) due to doubling growth |
+| `pop()` | Removes and returns last element, or `None` if empty |
+| `extend(iter)` | Extends from `ExactSizeIterator` with batch write optimization |
+| `extend_from_slice(slice)` | Efficiently copies slice using SIMD-optimized memcpy |
+| `reserve(n)` | Ensures capacity for `n` additional elements |
+| `reserve_exact(n)` | Reserves exactly `n` additional elements |
+| `try_reserve(n)` | Fallible version that returns `Err` on allocation failure |
+| `len()` | Returns current element count |
+| `is_empty()` | Returns `true` if vector has no elements |
+| `capacity()` | Returns total allocated slots |
+| `as_slice()` | Returns immutable slice view |
+| `as_mut_slice()` | Returns mutable slice view |
 
 #### `finish()`
 
-```rust
-pub fn finish(self) -> &'arena mut [T]
-```
-
-Consumes the vector, returning a slice backed by arena memory. Element destructors will **not** be called.
+Consumes the `ArenaVec` and returns a mutable slice backed by arena memory. **Important:** Element destructors will **not** be called after `finish()`. Use this when you want the arena to own the data.
 
 ```rust
 let mut arena = Arena::new();
@@ -331,72 +144,76 @@ vec.push(1);
 vec.push(2);
 let slice = vec.finish();
 // slice is &mut [u32] owned by arena
+// vec is consumed, no drop runs
 ```
 
 #### `extend_from_slice()`
 
-```rust
-pub fn extend_from_slice(&mut self, slice: &[T])
-where
-    T: Copy,
-```
-
-Efficiently copies elements from a slice using SIMD-optimized `memcpy`.
+Efficiently copies elements from a slice using SIMD-optimized `memcpy`. Faster than individual `push()` calls for bulk data:
 
 ```rust
 let mut arena = Arena::new();
 let mut vec = ArenaVec::new(&mut arena);
-vec.extend_from_slice(&[1, 2, 3, 4, 5]);
+let data = [1, 2, 3, 4, 5, 6, 7, 8];
+vec.extend_from_slice(&data);
+// All 8 elements copied in one memcpy call
 ```
 
 #### Capacity Management
 
-```rust
-pub fn reserve(&mut self, additional: usize)      // Reserve for `additional` more elements
-pub fn reserve_exact(&mut self, additional: usize) // Reserve exact capacity
-pub fn try_reserve(&mut self, additional: usize) -> Result<(), ()> // Fallible variant
-```
+The `reserve` methods pre-allocate space to avoid repeated growth copies:
 
-Pre-allocate capacity to avoid repeated growth:
+**`reserve(additional)`** ensures capacity for at least `additional` more elements (may allocate more):
 
 ```rust
 let mut arena = Arena::new();
 let mut vec = ArenaVec::with_capacity(&mut arena, 0);
-vec.reserve(1000); // Pre-allocate for 1000 elements
+vec.reserve(1000); // Capacity >= 1000
+```
 
-// Or try_reserve for fallible allocation
+**`reserve_exact(additional)`** reserves exactly `additional` elements (no extra capacity):
+
+```rust
+vec.reserve_exact(100);
+```
+
+**`try_reserve(additional)`** is the fallible variant that returns `Err` instead of panicking on allocation failure:
+
+```rust
 if vec.try_reserve(10000).is_err() {
-    // Arena out of memory
+    eprintln!("Arena out of memory");
 }
 ```
+
+#### Growth Strategy
+
+`ArenaVec` uses a doubling growth strategy: when capacity is exhausted, it doubles capacity and copies existing elements. This ensures amortized O(1) push while maintaining reasonable memory overhead (max 50% wasted space).
+
+For known sizes, use `with_capacity()` or `reserve()` to avoid growth copies entirely.
 
 ---
 
 ### Transaction
 
-A scoped RAII transaction over an `Arena`.
+A scoped RAII transaction over an `Arena` that provides automatic rollback on failure. Transactions are ideal for speculative operations where you want to either commit all changes or roll back to the initial state.
+
+**Key concepts:**
+- **Auto-rollback**: If a transaction is dropped without calling `commit()`, all allocations are rolled back
+- **Nested savepoints**: Create nested transactions that can be partially rolled back
+- **Budget enforcement**: Limit memory usage per transaction
+- **Metrics tracking**: Monitor allocation behavior within transactions
 
 #### Basic Operations
 
-```rust
-pub fn commit(mut self) -> TxnStatus     // Keep allocations
-pub fn rollback(self) -> TxnStatus       // Discard allocations
-pub fn savepoint(&mut self) -> Transaction<'_> // Nested transaction
-```
-
-#### Budget Control
-
-```rust
-pub fn set_limit(&mut self, bytes: usize)      // Set byte budget
-pub fn budget_remaining(&self) -> Option<usize> // Get remaining budget
-```
-
-#### Metrics
-
-```rust
-pub fn bytes_used(&self) -> usize  // Bytes allocated since open
-pub fn diff(&self) -> TxnDiff      // Allocation metrics
-```
+| Method | Description |
+|--------|-------------|
+| `commit()` | Commits transaction, keeping all allocations |
+| `rollback()` | Explicitly rolls back (same as dropping without commit) |
+| `savepoint()` | Creates a nested transaction (child of current) |
+| `set_limit(bytes)` | Sets byte budget; panics on exceeded |
+| `budget_remaining()` | Returns remaining budget or `None` if unlimited |
+| `bytes_used()` | Bytes allocated since transaction opened |
+| `diff()` | Returns `TxnDiff` with allocation metrics |
 
 #### Transaction-Scoped Allocation
 
@@ -406,7 +223,101 @@ Transaction exposes the same allocation methods as Arena:
 txn.alloc(val)           // Like arena.alloc
 txn.alloc_str(s)         // Like arena.alloc_str
 txn.try_alloc(val)       // Like arena.try_alloc
-// ... etc
+txn.alloc_slice(iter)    // Like arena.alloc_slice
+// ... all alloc variants available
+```
+
+#### Closure API (Recommended)
+
+The `with_transaction` closure API is recommended for cleaner error handling:
+
+```rust
+let mut arena = Arena::new();
+
+// Commits on Ok, rolls back on Err
+let result = arena.with_transaction(|txn| -> Result<u32, &str> {
+    let x = txn.alloc(21);
+    Ok(*x * 2)
+});
+assert_eq!(result, Ok(42)); // Transaction committed
+
+// Rollback on Err
+let result = arena.with_transaction(|txn| {
+    txn.alloc(1);
+    txn.alloc(2);
+    Err("validation failed") // Rolls back both allocations
+});
+assert!(result.is_err()); // Transaction rolled back
+```
+
+#### Manual API
+
+For more control, use the manual transaction API:
+
+```rust
+let mut arena = Arena::new();
+
+// Explicit commit
+{
+    let mut txn = arena.transaction();
+    txn.alloc(1);
+    txn.alloc(2);
+    txn.commit(); // Both allocations kept
+}
+
+// Auto-rollback on drop
+{
+    let mut txn = arena.transaction();
+    txn.alloc(99);
+    // dropped without commit → rolled back
+}
+```
+
+#### Nested Savepoints
+
+Transactions support nested savepoints for partial rollback:
+
+```rust
+let mut arena = Arena::new();
+let mut outer = arena.transaction();
+outer.alloc(1); // Will be kept
+
+{
+    let mut inner = outer.savepoint();
+    inner.alloc(2); // Will be rolled back
+    inner.alloc(3); // Will be rolled back
+    // inner dropped without commit → rolled back
+}
+
+outer.alloc(4); // Will be kept
+outer.commit(); // Keep 1 and 4
+```
+
+#### Budget Enforcement
+
+Set a byte limit to prevent unbounded allocation:
+
+```rust
+let mut arena = Arena::new();
+let mut txn = arena.transaction();
+txn.set_limit(1024); // Max 1KB
+
+// This panics - exceeds budget
+// txn.alloc(vec![0u8; 2000]);
+```
+
+#### Metrics
+
+Track allocation behavior:
+
+```rust
+let mut txn = arena.transaction();
+txn.alloc(1);
+txn.alloc(2);
+
+let diff = txn.diff();
+println!("Bytes: {}", diff.bytes_allocated);
+println!("Blocks touched: {}", diff.blocks_touched);
 ```
 
 ---
@@ -460,75 +371,6 @@ Automatic block allocation when current block is exhausted:
 let mut arena = Arena::with_capacity(64);
 for i in 0..1000 { arena.alloc(i); }
 println!("Blocks: {}", arena.block_count());
-```
-
----
-
-## Transaction Usage
-
-### Closure API
-
-```rust
-let mut arena = Arena::new();
-
-// Commits on Ok, rolls back on Err
-let result = arena.with_transaction(|txn| -> Result<u32, &str> {
-    Ok(*txn.alloc(21) * 2)
-});
-assert_eq!(result, Ok(42));
-
-// Rollback on Err or panic
-let result = arena.with_transaction(|txn| {
-    txn.alloc(1);
-    txn.alloc(2);
-    Err("something failed") // Rolls back
-});
-assert!(result.is_err());
-```
-
-### Manual API
-
-```rust
-let mut arena = Arena::new();
-
-// Explicit commit
-{
-    let mut txn = arena.transaction();
-    txn.alloc(1);
-    txn.commit();
-}
-
-// Auto-rollback on drop
-{
-    let mut txn = arena.transaction();
-    txn.alloc(99);
-    // dropped without commit → rolled back
-}
-```
-
-### Nested Savepoints
-
-```rust
-let mut outer = arena.transaction();
-outer.alloc(1);
-
-{
-    let mut inner = outer.savepoint();
-    inner.alloc(2);
-    inner.commit(); // Keep inner allocations
-}
-
-outer.commit(); // Keep everything
-```
-
-### Budget Enforcement
-
-```rust
-let mut txn = arena.transaction();
-txn.set_limit(1024); // 1KB max
-
-// Panics if over budget
-txn.alloc(vec![0u8; 2000]);
 ```
 
 ---
