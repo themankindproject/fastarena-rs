@@ -72,14 +72,15 @@ impl<'arena> Transaction<'arena> {
 impl<'arena> Transaction<'arena> {
     /// Commit the transaction, keeping all allocations.
     ///
-    /// Uses `mem::forget` to prevent `Drop` from ever running — rollback after
+    /// Uses `ManuallyDrop` to prevent `Drop` from ever running — rollback after
     /// commit is impossible.
     pub fn commit(self) -> TxnStatus {
-        let this = ManuallyDrop::new(self);
+        let mut this = ManuallyDrop::new(self);
         unsafe {
             let arena_ptr: *mut Arena = this.arena as *const _ as *mut _;
             (*arena_ptr).txn_depth = (*arena_ptr).txn_depth.wrapping_sub(1);
         }
+        this.committed = true;
         TxnStatus::Committed
     }
 

@@ -2,7 +2,7 @@ use std::alloc::{alloc, dealloc, Layout};
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ptr;
 
-/// Heap storage descriptor, stored in the union when spilled.
+/// Heap storage descriptor, stored in the union when spilled to the heap.
 #[derive(Clone, Copy)]
 struct HeapBuf<T> {
     /// Pointer to heap-allocated buffer.
@@ -43,7 +43,7 @@ unsafe impl<T: Sync, const N: usize> Sync for InlineVec<T, N> {}
 impl<T, const N: usize> InlineVec<T, N> {
     #[inline(always)]
     pub(crate) fn new() -> Self {
-        assert!(N > 0);
+        const { assert!(N > 0, "InlineVec requires N > 0") };
         InlineVec {
             data: Storage {
                 inline: ManuallyDrop::new(unsafe { std::mem::zeroed() }),
@@ -143,7 +143,7 @@ impl<T, const N: usize> InlineVec<T, N> {
 
     #[cold]
     fn promote_and_push(&mut self, val: T) {
-        let new_cap = N * 2;
+        let new_cap = N.checked_mul(2).expect("InlineVec: capacity overflow");
         let new_ptr = heap_alloc::<T>(new_cap);
         unsafe { ptr::copy_nonoverlapping((*self.data.inline).as_ptr() as *const T, new_ptr, N) };
         self.data = Storage {
@@ -161,10 +161,13 @@ impl<T, const N: usize> InlineVec<T, N> {
     fn heap_grow(&mut self) {
         let old_cap = unsafe { (*self.data.heap).cap };
         let old_ptr = unsafe { (*self.data.heap).ptr };
-        let new_cap = old_cap * 2;
+        let new_cap = old_cap
+            .checked_mul(2)
+            .expect("InlineVec: capacity overflow");
         let new_ptr = heap_alloc::<T>(new_cap);
         unsafe { ptr::copy_nonoverlapping(old_ptr, new_ptr, self.len) };
-        unsafe { dealloc(old_ptr as *mut u8, Layout::array::<T>(old_cap).unwrap()) };
+        let old_layout = Layout::array::<T>(old_cap).expect("InlineVec: layout overflow");
+        unsafe { dealloc(old_ptr as *mut u8, old_layout) };
         self.data = Storage {
             heap: ManuallyDrop::new(HeapBuf {
                 ptr: new_ptr,
@@ -216,12 +219,18 @@ impl<T, const N: usize> Drop for InlineVec<T, N> {
         if self.on_heap {
             let cap = unsafe { (*self.data.heap).cap };
             let raw = unsafe { (*self.data.heap).ptr } as *mut u8;
-            unsafe { dealloc(raw, Layout::array::<T>(cap).unwrap()) };
+            let layout = Layout::array::<T>(cap).expect("InlineVec: layout overflow on drop");
+            unsafe { dealloc(raw, layout) };
         }
     }
 }
 
 /// Allocates memory on the heap for `cap` elements of type `T`.
+///
+/// # Panics
+///
+/// Panics if allocation fails or if `cap` is so large that `Layout::array`
+/// would overflow.
 fn heap_alloc<T>(cap: usize) -> *mut T {
     let layout = Layout::array::<T>(cap).expect("InlineVec: layout overflow");
     let raw = unsafe { alloc(layout) };

@@ -1,4 +1,6 @@
 #[cfg(feature = "drop-tracking")]
+use std::panic::{catch_unwind, AssertUnwindSafe};
+#[cfg(feature = "drop-tracking")]
 use std::ptr;
 
 #[cfg(feature = "drop-tracking")]
@@ -47,7 +49,14 @@ impl DropRegistry {
     pub(crate) fn run_drops_until(&mut self, target_len: usize) {
         while self.entries.len() > target_len {
             let (p, shim) = self.entries.pop().unwrap();
-            unsafe { shim(p) };
+            let result = catch_unwind(AssertUnwindSafe(|| unsafe { shim(p) }));
+            if result.is_err() {
+                while self.entries.len() > target_len {
+                    let (p, shim) = self.entries.pop().unwrap();
+                    unsafe { shim(p) };
+                }
+                std::panic::panic_any("DropRegistry: destructor panicked");
+            }
         }
     }
 

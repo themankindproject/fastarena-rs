@@ -12,7 +12,6 @@ use crate::util::{
 use crate::util::drop_registry::DropRegistry;
 
 const DEFAULT_BLOCK_SIZE: usize = 64 * 1_024;
-const GROWTH_FACTOR: usize = 2;
 const MAX_BLOCK_SIZE: usize = 16 * 1_024 * 1_024;
 const BLOCKS_INLINE_CAP: usize = 8;
 
@@ -103,7 +102,7 @@ impl Arena {
         Arena {
             blocks,
             current: 0,
-            next_block_size: (size * GROWTH_FACTOR).min(MAX_BLOCK_SIZE),
+            next_block_size: size.saturating_mul(2).min(MAX_BLOCK_SIZE),
             bytes_allocated: 0,
             bytes_reserved: size,
             txn_depth: 0,
@@ -206,7 +205,11 @@ impl Arena {
         unsafe { &mut *(ptr.as_ptr() as *mut MaybeUninit<T>) }
     }
 
-    /// Allocate `size` bytes with `align` alignment, zeroed.
+    /// Allocate `size` bytes with the given `align` alignment, initialized to zero.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `align` is not a power of two or the system is out of memory.
     #[inline]
     pub fn alloc_zeroed(&mut self, size: usize, align: usize) -> NonNull<u8> {
         if size == 0 {
@@ -217,7 +220,14 @@ impl Arena {
         ptr
     }
 
-    /// Allocate `size` bytes aligned to a 64-byte cache line.
+    /// Allocate `size` bytes aligned to a 64-byte cache line boundary.
+    ///
+    /// This is useful for data structures that benefit from cache-line-aligned
+    /// access, such as SIMD operations or lock-free data structures.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the system is out of memory.
     #[inline]
     pub fn alloc_cache_aligned(&mut self, size: usize) -> NonNull<u8> {
         self.alloc_raw(size, CACHE_LINE_SIZE)
@@ -403,23 +413,23 @@ impl Arena {
 impl Arena {
     /// Register a raw pointer for destructor execution.
     ///
-    /// Only available with `drop-tracking`. Use after [`alloc_uninit`] once the
-    /// value is fully initialised.
+    /// Only available with the `drop-tracking` feature. Call this after
+    /// [`alloc_uninit`] once the value is fully initialised.
     ///
     /// # Safety
+    ///
     /// `ptr` must point to a fully initialised `T` allocated from this arena.
     /// Calling this twice for the same pointer causes a double-drop.
     #[cfg(feature = "drop-tracking")]
-    /// # Safety
-    /// `ptr` must point to a fully initialised `T` allocated from this arena.
-    /// Calling this twice for the same pointer causes a double-drop.
     pub unsafe fn register_drop<T>(&mut self, ptr: *mut T) {
         self.drop_registry.register(ptr);
     }
 
-    #[cfg(not(feature = "drop-tracking"))]
     /// # Safety
-    /// No-op when `drop-tracking` is disabled.
+    ///
+    /// This is a no-op when `drop-tracking` is disabled. No safety requirements
+    /// apply since the function does nothing.
+    #[cfg(not(feature = "drop-tracking"))]
     pub unsafe fn register_drop<T>(&mut self, _ptr: *mut T) {}
 
     /// Return a point-in-time snapshot of memory usage. O(1).
