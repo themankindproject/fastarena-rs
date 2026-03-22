@@ -53,8 +53,8 @@ pub struct Transaction<'arena> {
 impl<'arena> Transaction<'arena> {
     pub(crate) fn new(arena: &'arena mut Arena) -> Self {
         let checkpoint = arena.checkpoint();
-        let bytes_at_open = arena.stats().bytes_allocated;
-        let block_at_open = arena.current;
+        let bytes_at_open = checkpoint.bytes_allocated;
+        let block_at_open = checkpoint.block_idx;
         arena.txn_depth += 1;
         let depth = arena.txn_depth;
         Transaction {
@@ -76,10 +76,7 @@ impl<'arena> Transaction<'arena> {
     /// commit is impossible.
     pub fn commit(self) -> TxnStatus {
         let mut this = ManuallyDrop::new(self);
-        unsafe {
-            let arena_ptr = core::ptr::addr_of_mut!(*this.arena);
-            (*arena_ptr).txn_depth = (*arena_ptr).txn_depth.wrapping_sub(1);
-        }
+        this.arena.txn_depth = this.arena.txn_depth.wrapping_sub(1);
         TxnStatus::Committed
     }
 
@@ -133,10 +130,8 @@ impl<'arena> Transaction<'arena> {
     /// Bytes allocated by this transaction since it opened. O(1).
     #[inline(always)]
     pub fn bytes_used(&self) -> usize {
-        self.arena
-            .stats()
-            .bytes_allocated
-            .saturating_sub(self.bytes_at_open)
+        let current_used = self.arena.cur_ptr as usize - self.arena.cur_base;
+        (self.arena.bytes_allocated + current_used).saturating_sub(self.bytes_at_open)
     }
 
     /// Whether `commit()` has been called.
@@ -321,7 +316,11 @@ impl Drop for Transaction<'_> {
     fn drop(&mut self) {
         self.arena.txn_depth = self.arena.txn_depth.saturating_sub(1);
         if !self.committed {
-            self.arena.rewind(self.checkpoint);
+            #[cold]
+            fn do_rewind(arena: &mut Arena, checkpoint: Checkpoint) {
+                arena.rewind(checkpoint);
+            }
+            do_rewind(self.arena, self.checkpoint);
         }
     }
 }

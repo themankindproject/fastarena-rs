@@ -80,6 +80,7 @@ impl<'arena, T> ArenaVec<'arena, T> {
     }
 
     /// Append `val`. Amortised O(1).
+    #[inline]
     pub fn push(&mut self, val: T) {
         if self.len == self.cap {
             self.grow();
@@ -320,6 +321,8 @@ impl<'arena, T> ArenaVec<'arena, T> {
         unsafe { core::slice::from_raw_parts_mut(this.ptr.as_ptr(), this.len) }
     }
 
+    #[cold]
+    #[inline(never)]
     fn grow(&mut self) {
         let new_cap = if self.cap == 0 {
             4
@@ -331,6 +334,7 @@ impl<'arena, T> ArenaVec<'arena, T> {
         self.grow_to(new_cap);
     }
 
+    #[cold]
     fn grow_to(&mut self, new_cap: usize) {
         if mem::size_of::<T>() == 0 {
             self.cap = new_cap;

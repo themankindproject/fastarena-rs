@@ -79,8 +79,8 @@ pub struct Arena {
     pub(crate) drop_registry: DropRegistry,
     #[cfg(not(feature = "drop-tracking"))]
     _drop_registry: (),
-    cur_base: usize,
-    cur_ptr: *mut u8,
+    pub(crate) cur_base: usize,
+    pub(crate) cur_ptr: *mut u8,
     cur_end: *mut u8,
 }
 
@@ -367,7 +367,7 @@ impl Arena {
             cp.block_idx,
             self.blocks.len()
         );
-        assert!(
+        debug_assert!(
             cp.offset <= self.blocks[cp.block_idx].capacity,
             "rewind: checkpoint offset {} exceeds block capacity {}",
             cp.offset,
@@ -378,7 +378,7 @@ impl Arena {
         self.drop_registry.run_drops_until(cp.drop_registry_len);
 
         for i in (cp.block_idx + 1)..=self.current {
-            self.blocks[i].reset();
+            self.blocks.get_mut(i).offset = 0;
         }
         self.blocks[cp.block_idx].offset = cp.offset;
         self.bytes_allocated = cp.bytes_allocated - cp.offset;
@@ -393,7 +393,7 @@ impl Arena {
         #[cfg(feature = "drop-tracking")]
         self.drop_registry.run_all_drops();
         for i in 0..=self.current {
-            self.blocks[i].reset();
+            self.blocks.get_mut(i).offset = 0;
         }
         self.bytes_allocated = 0;
         self.set_current_block(0);
@@ -553,7 +553,7 @@ impl Arena {
 
     #[inline(always)]
     fn set_current_block(&mut self, idx: usize) {
-        let block = &self.blocks[idx];
+        let block = self.blocks.get(idx);
         self.current = idx;
         self.cur_base = block.base;
         self.cur_ptr = (block.base + block.offset) as *mut u8;

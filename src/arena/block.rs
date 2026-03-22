@@ -83,7 +83,7 @@ impl Drop for Block {
     }
 }
 
-#[inline]
+#[inline(always)]
 pub(crate) fn align_up(addr: usize, align: usize) -> usize {
     (addr + align - 1) & !(align - 1)
 }

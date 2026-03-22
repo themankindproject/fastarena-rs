@@ -60,12 +60,17 @@ impl<T, const N: usize> InlineVec<T, N> {
 
     #[inline(always)]
     pub(crate) fn push(&mut self, val: T) {
+        if !self.on_heap && self.len < N {
+            unsafe { (*self.data.inline)[self.len].write(val) };
+            self.len += 1;
+            return;
+        }
+        self.push_slow(val);
+    }
+
+    #[cold]
+    fn push_slow(&mut self, val: T) {
         if !self.on_heap {
-            if self.len < N {
-                unsafe { (*self.data.inline)[self.len].write(val) };
-                self.len += 1;
-                return;
-            }
             self.promote_and_push(val);
         } else {
             if self.len == unsafe { (*self.data.heap).cap } {
@@ -180,12 +185,22 @@ impl<T, const N: usize> InlineVec<T, N> {
 impl<T, const N: usize> std::ops::Index<usize> for InlineVec<T, N> {
     type Output = T;
     fn index(&self, i: usize) -> &T {
-        self.get(i)
+        assert!(i < self.len, "index {i} out of bounds (len={})", self.len);
+        if !self.on_heap {
+            unsafe { (*self.data.inline)[i].assume_init_ref() }
+        } else {
+            unsafe { &*(*self.data.heap).ptr.add(i) }
+        }
     }
 }
 impl<T, const N: usize> std::ops::IndexMut<usize> for InlineVec<T, N> {
     fn index_mut(&mut self, i: usize) -> &mut T {
-        self.get_mut(i)
+        assert!(i < self.len, "index {i} out of bounds (len={})", self.len);
+        if !self.on_heap {
+            unsafe { (*self.data.inline)[i].assume_init_mut() }
+        } else {
+            unsafe { &mut *(*self.data.heap).ptr.add(i) }
+        }
     }
 }
 impl<'a, T, const N: usize> IntoIterator for &'a InlineVec<T, N> {
