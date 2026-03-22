@@ -6,7 +6,7 @@
 //! - **O(1) amortised allocation** — bump pointer advance with a single bounds check
 //! - **Checkpoint / rewind** — snapshot arena state in O(1), undo allocations
 //! - **RAII transactions** — auto-rollback on drop, explicit commit via `mem::forget`
-//! - **Transaction budget** — cap bytes consumed per transaction
+//! - **Transaction budget** — cap arena bytes per transaction (tracks inline sizes only; heap allocations inside values are not counted)
 //! - **Zero-cost reset** — reuse all allocated blocks without OS calls
 //! - **`ArenaVec<T>`** — append-only growable vector backed by arena memory
 //!

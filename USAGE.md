@@ -87,6 +87,10 @@ arena.reset();
 
 No other arena allocator gives you RAII transactions. Allocations succeed or roll back as a unit — no leaks, no manual cleanup.
 
+> **Note:** Each `alloc` call returns a `&mut T` that borrows the transaction.
+> Don't hold references across subsequent allocations — use the value and let it
+> drop before calling `alloc` again.
+
 ```rust
 use fastarena::Arena;
 
@@ -94,7 +98,7 @@ let mut arena = Arena::new();
 
 // Ok commits, Err rolls back — all allocations are atomic
 let result: Result<u32, &str> = arena.with_transaction(|txn| {
-    let name = txn.alloc_str("fastarena");
+    txn.alloc_str("fastarena");
     let score = txn.alloc(100u32);
     Ok(*score)
 });
@@ -123,7 +127,7 @@ use fastarena::Arena;
 
 let mut arena = Arena::new();
 let mut outer = arena.transaction();
-let parser_ast = outer.alloc_str("top-level");
+outer.alloc_str("top-level");
 
 {
     let mut inner = outer.savepoint();
@@ -132,8 +136,8 @@ let parser_ast = outer.alloc_str("top-level");
     // dropped without commit — inner work discarded, outer untouched
 }
 
-let final_ast = outer.alloc_str("confirmed");
-outer.commit();  // parser_ast + final_ast survive
+outer.alloc_str("confirmed");
+outer.commit();  // "top-level" + "confirmed" survive
 ```
 
 ### ArenaVec with `finish()` — Transfer Ownership to the Arena
@@ -161,6 +165,10 @@ assert_eq!(items[512], 512);
 
 Set a byte budget on any transaction. Exceed it and `alloc` panics (or `try_alloc` returns `None`). Zero-cost when unlimited.
 
+> **Note:** `alloc(vec![0u8; N])` stores only the `Vec` struct (24 bytes) in the
+> arena — the heap buffer is *not* arena-tracked. To budget actual data bytes,
+> use `alloc_slice` or `alloc_slice_copy` instead.
+
 ```rust
 use fastarena::Arena;
 
@@ -168,8 +176,13 @@ let mut arena = Arena::new();
 let mut txn = arena.transaction();
 txn.set_limit(4096);  // hard cap
 
-txn.alloc(vec![0u8; 2048]);  // ok
-// txn.alloc(vec![0u8; 4096]);  // panics: budget exceeded
+// GOOD — alloc_slice copies data into arena, budget sees all bytes
+txn.alloc_slice(vec![0u8; 2048]);  // ok — 2048 arena bytes
+// txn.alloc_slice(vec![0u8; 4096]);  // panics: budget exceeded (2048 + 4096 > 4096)
+
+// BAD — alloc(vec![...]) stores only the 24-byte Vec struct, heap is untracked
+// txn.alloc(vec![0u8; 9999]);  // would NOT panic — budget sees 24 bytes
+
 let remaining = txn.budget_remaining();  // introspect at any time
 txn.commit();
 ```
@@ -377,9 +390,9 @@ outer.commit(); // 1 survives
 ```rust
 let mut txn = arena.transaction();
 txn.set_limit(1024);
-txn.alloc(vec![0u8; 512]);       // ok
-// txn.alloc(vec![0u8; 1024]);   // panics: budget exceeded
-txn.try_alloc(vec![0u8; 1024]);  // returns None
+txn.alloc_slice(vec![0u8; 512]);       // ok — 512 arena bytes
+// txn.alloc_slice(vec![0u8; 1024]);   // panics: budget exceeded
+txn.try_alloc_slice(vec![0u8; 1024]);  // returns None
 txn.commit();
 ```
 

@@ -40,6 +40,32 @@ pub struct TxnDiff {
 ///
 /// [`set_limit`](Transaction::set_limit) imposes a byte cap. `alloc*` methods
 /// panic when exceeded; `try_alloc*` methods return `None`.
+///
+/// The budget tracks bytes written to arena blocks. Heap allocations *inside*
+/// values (e.g. `Vec`, `String`, `Box`) are **not** counted — only the struct
+/// size (`size_of::<T>()`) is budgeted.
+///
+/// ## What to use instead
+///
+/// To budget actual data bytes, allocate raw data with `alloc_slice` /
+/// `alloc_slice_copy` / `alloc_str` and build the container yourself:
+///
+/// ```ignore
+/// // BAD — budgets 24 bytes (Vec struct), heap buffer is untracked
+/// txn.alloc(vec![0u8; 4096]);
+///
+/// // GOOD — budgets all 4096 bytes (data lives in arena, no heap)
+/// let buf: &mut [u8] = txn.alloc_slice(vec![0u8; 4096]);
+///
+/// // GOOD — same, zero-copy for Copy types
+/// let buf: &mut [u8] = txn.alloc_slice_copy(&[0u8; 4096]);
+/// ```
+///
+/// If you *need* `Vec`/`String` inside a budgeted transaction, split the
+/// operation: allocate the raw data via Transaction methods (budget-checked),
+/// then construct the container via [`arena_mut`](Transaction::arena_mut).
+/// Allocations through `arena_mut` still participate in rollback but **bypass**
+/// the budget pre-check.
 pub struct Transaction<'arena> {
     pub(crate) arena: &'arena mut Arena,
     checkpoint: Checkpoint,
@@ -98,13 +124,24 @@ impl<'arena> Transaction<'arena> {
     /// Set a byte budget for this transaction.
     ///
     /// `alloc*` panics when exceeded; `try_alloc*` returns `None`. The limit
-    /// is checked against `size_of::<T>()` before padding, so actual
-    /// consumption may be marginally higher.
+    /// is checked against `size_of::<T>()` (the inline struct size), so
+    /// heap allocations inside values (`Vec`, `String`, `Box`) are **not**
+    /// tracked — only the struct footprint is counted against the budget.
+    ///
+    /// To budget actual data bytes, use [`alloc_slice`](Transaction::alloc_slice),
+    /// [`alloc_str`](Transaction::alloc_str), or
+    /// [`alloc_slice_copy`](Arena::alloc_slice_copy) (via
+    /// [`arena_mut`](Transaction::arena_mut), which itself bypasses the budget).
     pub fn set_limit(&mut self, bytes: usize) {
         self.limit = Some(bytes);
     }
 
     /// Bytes remaining in the budget, or `None` if no limit is set.
+    ///
+    /// This reflects the arena bytes written via Transaction allocation
+    /// methods. It does **not** account for heap allocations inside values
+    /// (e.g. `Vec` buffers) or allocations made through
+    /// [`arena_mut`](Transaction::arena_mut).
     pub fn budget_remaining(&self) -> Option<usize> {
         self.limit.map(|lim| lim.saturating_sub(self.bytes_used()))
     }
@@ -130,6 +167,14 @@ impl<'arena> Transaction<'arena> {
 
 impl<'arena> Transaction<'arena> {
     /// Bytes allocated by this transaction since it opened. O(1).
+    ///
+    /// Includes all arena bytes written — both via Transaction methods and via
+    /// [`arena_mut`](Transaction::arena_mut). Includes alignment padding.
+    ///
+    /// **Note:** The value is only fully accurate after a block-boundary
+    /// crossing. Allocations within the current block that haven't triggered a
+    /// block switch are tracked via the live pointer offset and included in the
+    /// total.
     #[inline(always)]
     pub fn bytes_used(&self) -> usize {
         let current_used = self.arena.cur_ptr as usize - self.arena.cur_base;
@@ -165,6 +210,11 @@ impl<'arena> Transaction<'arena> {
     /// Use when you need to pass the arena to a helper that takes `&mut Arena`
     /// directly (e.g. constructing an [`ArenaVec`](crate::ArenaVec) inside a
     /// transaction).
+    ///
+    /// **Warning:** Allocations made through the returned `&mut Arena` **bypass**
+    /// the transaction's budget. They still participate in rollback, but their
+    /// bytes are not pre-checked against [`set_limit`](Transaction::set_limit).
+    /// Budget tracking resumes once a Transaction allocation method is called.
     #[inline]
     pub fn arena_mut(&mut self) -> &mut Arena {
         self.arena
@@ -183,6 +233,10 @@ impl<'arena> Transaction<'arena> {
     /// Allocate a value of type `T` into the arena.
     ///
     /// See [`Arena::alloc`] for details.
+    ///
+    /// The budget (if set) is checked against `size_of::<T>()`. Heap
+    /// allocations *inside* `val` (e.g. `Vec` buffers, `String` heap data)
+    /// are **not** counted — only the struct footprint is budgeted.
     #[inline]
     pub fn alloc<T>(&mut self, val: T) -> &mut T {
         if !self.budget_ok(mem::size_of::<T>()) {
