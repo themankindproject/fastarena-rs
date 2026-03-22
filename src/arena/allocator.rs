@@ -134,7 +134,7 @@ impl Arena {
     #[inline]
     pub fn alloc<T>(&mut self, val: T) -> &mut T {
         if mem::size_of::<T>() == 0 {
-            return unsafe { &mut *std::ptr::dangling_mut::<T>() };
+            return unsafe { &mut *(mem::align_of::<T>() as *mut T) };
         }
         let ptr = self.alloc_raw_inner(mem::size_of::<T>(), mem::align_of::<T>());
         unsafe {
@@ -273,7 +273,7 @@ impl Arena {
     #[inline]
     pub fn try_alloc<T>(&mut self, val: T) -> Option<&mut T> {
         if mem::size_of::<T>() == 0 {
-            return Some(unsafe { &mut *std::ptr::dangling_mut::<T>() });
+            return Some(unsafe { &mut *(mem::align_of::<T>() as *mut T) });
         }
         let ptr = self.try_alloc_raw_inner(mem::size_of::<T>(), mem::align_of::<T>())?;
         Some(unsafe {

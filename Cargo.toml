@@ -5,11 +5,12 @@ edition      = "2021"
 authors      = ["Ashutosh Kumar <kumarashutosh34169@gmail.com>"]
 description  = "A zero-dependency, bump-pointer arena allocator with RAII transactions, nested savepoints, optional LIFO destructor tracking, and ArenaVec — built for compilers, storage engines, and high-throughput request-scoped workloads."
 license      = "MIT"
-repository   = "https://github.com/themankindproject/fastarena"
-homepage     = "https://github.com/themankindproject/fastarena"
+repository   = "https://github.com/themankindproject/fastarena-rs"
+homepage     = "https://github.com/themankindproject/fastarena-rs"
+rust-version = "1.66"
 documentation = "https://docs.rs/fastarena"
 readme       = "README.md"
-keywords     = ["arena", "allocator", "bump", "memory"]
+keywords     = ["arena", "allocator", "bump", "memory", "transaction"]
 categories   = ["memory-management", "data-structures"]
 exclude      = [
     ".github/**",

@@ -111,8 +111,10 @@ impl<'arena> Transaction<'arena> {
 
     #[inline]
     fn budget_ok(&self, additional: usize) -> bool {
-        self.limit
-            .is_none_or(|lim| self.bytes_used().saturating_add(additional) <= lim)
+        match self.limit {
+            None => true,
+            Some(lim) => self.bytes_used().saturating_add(additional) <= lim,
+        }
     }
 
     #[cold]

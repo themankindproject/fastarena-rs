@@ -9,11 +9,19 @@ use super::inline_vec::InlineVec;
 #[cfg(feature = "drop-tracking")]
 const DROP_INLINE_CAP: usize = 32;
 
+/// A single drop entry — either a single element or a contiguous slice.
 #[cfg(feature = "drop-tracking")]
-type DropEntry = (*mut u8, unsafe fn(*mut u8));
-
-#[cfg(feature = "drop-tracking")]
-type DropRangeEntry = (*mut u8, usize, unsafe fn(*mut u8, usize));
+enum DropSlot {
+    Single {
+        ptr: *mut u8,
+        shim: unsafe fn(*mut u8),
+    },
+    Range {
+        ptr: *mut u8,
+        count: usize,
+        shim: unsafe fn(*mut u8, usize),
+    },
+}
 
 /// Tracks allocations with non-trivial destructors so that [`Arena::reset`]
 /// and [`Arena::rewind`] can run them in LIFO order before reclaiming memory.
@@ -22,8 +30,7 @@ type DropRangeEntry = (*mut u8, usize, unsafe fn(*mut u8, usize));
 /// feature is disabled — every method becomes an unconditional no-op.
 #[cfg(feature = "drop-tracking")]
 pub(crate) struct DropRegistry {
-    entries: InlineVec<DropEntry, DROP_INLINE_CAP>,
-    range_entries: InlineVec<DropRangeEntry, DROP_INLINE_CAP>,
+    slots: InlineVec<DropSlot, DROP_INLINE_CAP>,
 }
 
 #[cfg_attr(not(feature = "drop-tracking"), allow(dead_code))]
@@ -32,8 +39,7 @@ impl DropRegistry {
     #[inline]
     pub(crate) fn new() -> Self {
         DropRegistry {
-            entries: InlineVec::new(),
-            range_entries: InlineVec::new(),
+            slots: InlineVec::new(),
         }
     }
 
@@ -44,7 +50,10 @@ impl DropRegistry {
             unsafe fn drop_shim<T>(p: *mut u8) {
                 ptr::drop_in_place(p as *mut T);
             }
-            self.entries.push((ptr as *mut u8, drop_shim::<T>));
+            self.slots.push(DropSlot::Single {
+                ptr: ptr as *mut u8,
+                shim: drop_shim::<T>,
+            });
         }
     }
 
@@ -62,8 +71,11 @@ impl DropRegistry {
                     ptr::drop_in_place(ptr.add(i));
                 }
             }
-            self.range_entries
-                .push((ptr as *mut u8, count, drop_range_shim::<T>));
+            self.slots.push(DropSlot::Range {
+                ptr: ptr as *mut u8,
+                count,
+                shim: drop_range_shim::<T>,
+            });
         }
     }
 
@@ -71,24 +83,28 @@ impl DropRegistry {
     /// Called by `rewind` to drop only objects allocated after a checkpoint.
     #[allow(dead_code)]
     pub(crate) fn run_drops_until(&mut self, target_len: usize) {
-        while self.range_entries.len() > target_len {
-            let (p, count, shim) = self.range_entries.pop().unwrap();
-            let result = catch_unwind(AssertUnwindSafe(|| unsafe { shim(p, count) }));
-            if result.is_err() {
-                while self.range_entries.len() > target_len {
-                    let (p, count, shim) = self.range_entries.pop().unwrap();
-                    let _ = catch_unwind(AssertUnwindSafe(|| unsafe { shim(p, count) }));
+        while self.slots.len() > target_len {
+            let slot = self.slots.pop().unwrap();
+            let result = match slot {
+                DropSlot::Single { ptr, shim } => {
+                    catch_unwind(AssertUnwindSafe(|| unsafe { shim(ptr) }))
                 }
-                std::panic::panic_any("DropRegistry: destructor panicked");
-            }
-        }
-        while self.entries.len() > target_len {
-            let (p, shim) = self.entries.pop().unwrap();
-            let result = catch_unwind(AssertUnwindSafe(|| unsafe { shim(p) }));
+                DropSlot::Range { ptr, count, shim } => {
+                    catch_unwind(AssertUnwindSafe(|| unsafe { shim(ptr, count) }))
+                }
+            };
             if result.is_err() {
-                while self.entries.len() > target_len {
-                    let (p, shim) = self.entries.pop().unwrap();
-                    let _ = catch_unwind(AssertUnwindSafe(|| unsafe { shim(p) }));
+                // Drain remaining entries, ignoring further panics, then re-raise.
+                while self.slots.len() > target_len {
+                    let slot = self.slots.pop().unwrap();
+                    match slot {
+                        DropSlot::Single { ptr, shim } => {
+                            let _ = catch_unwind(AssertUnwindSafe(|| unsafe { shim(ptr) }));
+                        }
+                        DropSlot::Range { ptr, count, shim } => {
+                            let _ = catch_unwind(AssertUnwindSafe(|| unsafe { shim(ptr, count) }));
+                        }
+                    }
                 }
                 std::panic::panic_any("DropRegistry: destructor panicked");
             }
@@ -100,10 +116,11 @@ impl DropRegistry {
     pub(crate) fn run_all_drops(&mut self) {
         self.run_drops_until(0);
     }
+
     #[allow(dead_code)]
     #[inline(always)]
     pub(crate) fn len(&self) -> usize {
-        self.range_entries.len() + self.entries.len()
+        self.slots.len()
     }
 }
 
