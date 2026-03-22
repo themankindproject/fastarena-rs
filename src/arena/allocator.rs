@@ -171,6 +171,25 @@ impl Arena {
         }
     }
 
+    /// Allocate a contiguous slice from a slice of `Copy` items using a single memcpy.
+    /// Significantly faster than `alloc_slice` for small-to-medium `Copy` types.
+    #[inline]
+    pub fn alloc_slice_copy<T: Copy>(&mut self, src: &[T]) -> &mut [T] {
+        let len = src.len();
+        if len == 0 {
+            return &mut [];
+        }
+        let total = mem::size_of::<T>().checked_mul(len).expect("overflow");
+        let ptr = self.alloc_raw_inner(total, mem::align_of::<T>());
+        unsafe {
+            let dst = ptr.as_ptr() as *mut T;
+            std::ptr::copy_nonoverlapping(src.as_ptr(), dst, len);
+            #[cfg(feature = "drop-tracking")]
+            self.drop_registry.register_slice(dst, len);
+            std::slice::from_raw_parts_mut(dst, len)
+        }
+    }
+
     /// Copy a string slice into the arena and return a reference to it.
     #[inline(always)]
     pub fn alloc_str(&mut self, s: &str) -> &str {
@@ -326,7 +345,7 @@ impl Arena {
         Checkpoint {
             block_idx: self.current,
             offset: current_offset,
-            bytes_allocated: self.bytes_allocated,
+            bytes_allocated: self.bytes_allocated + current_offset,
             #[cfg(feature = "drop-tracking")]
             drop_registry_len: self.drop_registry.len(),
         }
@@ -358,11 +377,11 @@ impl Arena {
         #[cfg(feature = "drop-tracking")]
         self.drop_registry.run_drops_until(cp.drop_registry_len);
 
-        for i in (cp.block_idx + 1)..self.blocks.len() {
+        for i in (cp.block_idx + 1)..=self.current {
             self.blocks[i].reset();
         }
         self.blocks[cp.block_idx].offset = cp.offset;
-        self.bytes_allocated = cp.bytes_allocated;
+        self.bytes_allocated = cp.bytes_allocated - cp.offset;
         self.set_current_block(cp.block_idx);
     }
 
@@ -373,8 +392,8 @@ impl Arena {
     pub fn reset(&mut self) {
         #[cfg(feature = "drop-tracking")]
         self.drop_registry.run_all_drops();
-        for block in self.blocks.iter_mut() {
-            block.reset();
+        for i in 0..=self.current {
+            self.blocks[i].reset();
         }
         self.bytes_allocated = 0;
         self.set_current_block(0);
@@ -446,8 +465,9 @@ impl Arena {
     /// Return a point-in-time snapshot of memory usage. O(1).
     #[inline(always)]
     pub fn stats(&self) -> ArenaStats {
+        let current_used = self.cur_ptr as usize - self.cur_base;
         ArenaStats {
-            bytes_allocated: self.bytes_allocated,
+            bytes_allocated: self.bytes_allocated + current_used,
             bytes_reserved: self.bytes_reserved,
             block_count: self.blocks.len(),
         }
@@ -466,7 +486,6 @@ impl Arena {
         let aligned_ptr = align_up(self.cur_ptr as usize, align) as *mut u8;
         let next = unsafe { aligned_ptr.add(size) };
         if next <= self.cur_end {
-            self.bytes_allocated += next as usize - self.cur_ptr as usize;
             self.cur_ptr = next;
             return unsafe { NonNull::new_unchecked(aligned_ptr) };
         }
@@ -478,7 +497,6 @@ impl Arena {
         let aligned_ptr = align_up(self.cur_ptr as usize, align) as *mut u8;
         let next = unsafe { aligned_ptr.add(size) };
         if next <= self.cur_end {
-            self.bytes_allocated += next as usize - self.cur_ptr as usize;
             self.cur_ptr = next;
             return Some(unsafe { NonNull::new_unchecked(aligned_ptr) });
         }
@@ -487,6 +505,7 @@ impl Arena {
 
     #[cold]
     fn alloc_slow(&mut self, size: usize, align: usize) -> NonNull<u8> {
+        self.bytes_allocated += self.cur_ptr as usize - self.cur_base;
         self.blocks[self.current].offset = self.cur_ptr as usize - self.cur_base;
 
         for i in (self.current + 1)..self.blocks.len() {
@@ -511,6 +530,7 @@ impl Arena {
 
     #[cold]
     fn alloc_slow_try(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
+        self.bytes_allocated += self.cur_ptr as usize - self.cur_base;
         self.blocks[self.current].offset = self.cur_ptr as usize - self.cur_base;
 
         for i in (self.current + 1)..self.blocks.len() {

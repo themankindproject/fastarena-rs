@@ -101,7 +101,7 @@ impl DropRegistry {
         self.run_drops_until(0);
     }
     #[allow(dead_code)]
-    #[inline]
+    #[inline(always)]
     pub(crate) fn len(&self) -> usize {
         self.range_entries.len() + self.entries.len()
     }

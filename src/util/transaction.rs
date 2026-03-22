@@ -1,6 +1,6 @@
-use std::mem::{self, ManuallyDrop};
+use core::mem::{self, ManuallyDrop};
+use core::ptr::NonNull;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::ptr::NonNull;
 
 use crate::arena::{Arena, Checkpoint, CACHE_LINE_SIZE};
 
@@ -53,7 +53,7 @@ pub struct Transaction<'arena> {
 impl<'arena> Transaction<'arena> {
     pub(crate) fn new(arena: &'arena mut Arena) -> Self {
         let checkpoint = arena.checkpoint();
-        let bytes_at_open = arena.bytes_allocated;
+        let bytes_at_open = arena.stats().bytes_allocated;
         let block_at_open = arena.current;
         arena.txn_depth += 1;
         let depth = arena.txn_depth;
@@ -134,6 +134,7 @@ impl<'arena> Transaction<'arena> {
     #[inline(always)]
     pub fn bytes_used(&self) -> usize {
         self.arena
+            .stats()
             .bytes_allocated
             .saturating_sub(self.bytes_at_open)
     }

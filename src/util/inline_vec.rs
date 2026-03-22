@@ -1,6 +1,6 @@
+use core::mem::{ManuallyDrop, MaybeUninit};
+use core::ptr;
 use std::alloc::{alloc, dealloc, Layout};
-use std::mem::{ManuallyDrop, MaybeUninit};
-use std::ptr;
 
 /// Heap storage descriptor, stored in the union when spilled to the heap.
 #[derive(Clone, Copy)]
