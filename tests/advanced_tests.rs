@@ -1,26 +1,4 @@
-// tests/advanced_tests.rs
-//
-// Comprehensive tests for arena-alloc v0.1 features:
-//   • alloc_uninit / alloc_zeroed
-//   • try_alloc family (OOM-safe)
-//   • O(1) stats accounting
-//   • Transaction depth tracking
-//   • Transaction budgets
-//   • TxnDiff metrics
-//   • ArenaVec (push/pop/finish/grow/drop)
-//   • Multi-block nested transactions
-//   • Large allocations inside savepoints
-//   • Alignment edge cases (4096-byte)
-//   • Panic-safe rollback
-//   • drop-tracking correctness (feature-gated)
-//   • with_transaction_infallible
-//   • Hardened commit (mem::forget)
-
 use fastarena::{Arena, ArenaVec, TxnStatus};
-
-// ============================================================================
-// alloc_uninit
-// ============================================================================
 
 #[test]
 fn alloc_uninit_write_and_read() {
@@ -33,11 +11,12 @@ fn alloc_uninit_write_and_read() {
 
 #[test]
 fn alloc_uninit_alignment_correct() {
+    #[allow(dead_code)]
     #[repr(align(32))]
     struct A32(u64);
 
     let mut arena = Arena::new();
-    let _ = arena.alloc(1u8); // create misalignment
+    let _ = arena.alloc(1u8);
     let slot = arena.alloc_uninit::<A32>();
     let ptr = slot as *mut _ as usize;
     assert_eq!(ptr % 32, 0, "alloc_uninit must respect alignment");
@@ -55,10 +34,6 @@ fn alloc_uninit_zst() {
     );
 }
 
-// ============================================================================
-// alloc_zeroed
-// ============================================================================
-
 #[test]
 fn alloc_zeroed_all_bytes_zero() {
     let mut arena = Arena::new();
@@ -70,7 +45,7 @@ fn alloc_zeroed_all_bytes_zero() {
 #[test]
 fn alloc_zeroed_alignment() {
     let mut arena = Arena::new();
-    let _ = arena.alloc(1u8); // misalign
+    let _ = arena.alloc(1u8);
     let ptr = arena.alloc_zeroed(128, 64);
     assert_eq!(ptr.as_ptr() as usize % 64, 0, "must be cache-line aligned");
 }
@@ -82,10 +57,6 @@ fn alloc_zeroed_zero_size() {
     let _p = arena.alloc_zeroed(0, 8);
     assert_eq!(arena.stats().bytes_allocated, before);
 }
-
-// ============================================================================
-// try_alloc family
-// ============================================================================
 
 #[test]
 fn try_alloc_success() {
@@ -126,10 +97,6 @@ fn try_alloc_raw_success() {
     let p = arena.try_alloc_raw(16, 8);
     assert!(p.is_some());
 }
-
-// ============================================================================
-// O(1) stats accounting
-// ============================================================================
 
 #[test]
 fn stats_o1_bytes_allocated_increments() {
@@ -195,7 +162,6 @@ fn stats_after_reset_zeroed() {
 #[test]
 fn stats_bytes_reserved_includes_all_blocks() {
     let mut arena = Arena::with_capacity(32);
-    // Force multi-block growth
     for _ in 0..100 {
         let _ = arena.alloc(0u64);
     }
@@ -203,10 +169,6 @@ fn stats_bytes_reserved_includes_all_blocks() {
     assert!(s.bytes_reserved >= s.bytes_allocated);
     assert!(s.block_count >= 2);
 }
-
-// ============================================================================
-// Transaction depth tracking
-// ============================================================================
 
 #[test]
 fn depth_zero_initially() {
@@ -251,21 +213,16 @@ fn depth_decrements_on_rollback() {
     {
         let mut txn = arena.transaction();
         let _ = txn.alloc(1u32);
-        // dropped → rollback
     }
     assert_eq!(arena.transaction_depth(), 0);
 }
-
-// ============================================================================
-// Transaction budget
-// ============================================================================
 
 #[test]
 fn budget_allows_exact_usage() {
     let mut arena = Arena::new();
     let mut txn = arena.transaction();
     txn.set_limit(8);
-    let _ = txn.alloc(0u64); // exactly 8 bytes
+    let _ = txn.alloc(0u64);
     assert_eq!(txn.budget_remaining(), Some(0));
     txn.commit();
 }
@@ -275,10 +232,9 @@ fn budget_try_alloc_returns_none_when_exceeded() {
     let mut arena = Arena::new();
     let mut txn = arena.transaction();
     txn.set_limit(4);
-    let _ = txn.alloc(0u32); // 4 bytes — ok
-                             // next try_alloc should fail
+    let _ = txn.alloc(0u32);
     let r = txn.try_alloc(0u32);
-    assert!(r.is_none(), "budget exceeded → None");
+    assert!(r.is_none(), "budget exceeded");
     txn.commit();
 }
 
@@ -290,10 +246,9 @@ fn budget_alloc_panics_when_exceeded() {
         let a = unsafe { &mut *arena_ptr };
         let mut txn = a.transaction();
         txn.set_limit(0);
-        let _ = txn.alloc(1u8); // should panic
+        let _ = txn.alloc(1u8);
     }));
     assert!(result.is_err(), "expected budget-exceeded panic");
-    // arena rolled back cleanly
     assert_eq!(arena.stats().bytes_allocated, 0);
 }
 
@@ -311,17 +266,13 @@ fn budget_remaining_none_without_limit() {
 fn budget_try_alloc_str_respects_limit() {
     let mut arena = Arena::new();
     let mut txn = arena.transaction();
-    txn.set_limit(3); // only 3 bytes
-    let r = txn.try_alloc_str("hello"); // 5 bytes → should fail
+    txn.set_limit(3);
+    let r = txn.try_alloc_str("hello");
     assert!(r.is_none());
-    let ok = txn.try_alloc_str("hi"); // 2 bytes — fits
+    let ok = txn.try_alloc_str("hi");
     assert_eq!(ok, Some("hi"));
     txn.commit();
 }
-
-// ============================================================================
-// TxnDiff metrics
-// ============================================================================
 
 #[test]
 fn diff_zero_on_empty_txn() {
@@ -346,9 +297,8 @@ fn diff_reflects_allocations() {
 
 #[test]
 fn diff_blocks_touched_increases_across_blocks() {
-    let mut arena = Arena::with_capacity(32); // tiny blocks
+    let mut arena = Arena::with_capacity(32);
     let mut txn = arena.transaction();
-    // Force spill into multiple blocks
     for _ in 0..20 {
         let _ = txn.alloc(0u64);
     }
@@ -362,23 +312,16 @@ fn diff_blocks_touched_increases_across_blocks() {
 
 #[test]
 fn bytes_used_is_o1() {
-    // bytes_used() should be a simple subtraction, not a sum.
     let mut arena = Arena::new();
     let mut txn = arena.transaction();
     for _ in 0..1000 {
         let _ = txn.alloc(0u64);
     }
     let used = txn.bytes_used();
-    // should be at least 1000 * 8 bytes
     assert!(used >= 8000, "expected >= 8000 bytes, got {used}");
     txn.commit();
-    // After commit the full amount should be in stats
     assert!(arena.stats().bytes_allocated >= 8000);
 }
-
-// ============================================================================
-// Hardened commit (mem::forget)
-// ============================================================================
 
 #[test]
 fn commit_returns_committed_status() {
@@ -391,10 +334,8 @@ fn commit_returns_committed_status() {
 fn commit_depth_decremented() {
     let mut arena = Arena::new();
     let txn = arena.transaction();
-    // while open, depth is 1
     assert_eq!(txn.arena_depth(), 1);
     txn.commit();
-    // after commit, depth is restored
     assert_eq!(arena.transaction_depth(), 0);
 }
 
@@ -417,10 +358,6 @@ fn rollback_returns_rolledback_status() {
     assert_eq!(arena.stats().bytes_allocated, 0);
 }
 
-// ============================================================================
-// Nested transactions across multiple blocks
-// ============================================================================
-
 #[test]
 fn nested_txn_across_multiple_blocks() {
     let mut arena = Arena::with_capacity(64);
@@ -429,12 +366,11 @@ fn nested_txn_across_multiple_blocks() {
 
     {
         let mut inner = outer.savepoint();
-        // 200 bytes in a 64-byte-initial arena → multiple blocks
         for _ in 0..25 {
             let _ = inner.alloc(0u64);
         }
         assert!(inner.diff().blocks_touched >= 2);
-        inner.commit(); // merged into outer
+        inner.commit();
     }
 
     let diff = outer.diff();
@@ -452,12 +388,10 @@ fn nested_txn_rollback_across_multiple_blocks() {
         for _ in 0..25 {
             let _ = txn.alloc(0u64);
         }
-        // Check block spill via diff() — no need to access arena directly
         assert!(
             txn.diff().blocks_touched >= 2,
             "25 × 8B into 64B blocks must spill"
         );
-        // rolled back
     }
 
     assert_eq!(
@@ -480,7 +414,6 @@ fn nested_savepoint_partial_rollback_partial_commit() {
         for _ in 0..25 {
             let _ = sp.alloc(0u64);
         }
-        // rolled back — only outer's alloc should remain
     }
 
     assert_eq!(
@@ -491,17 +424,12 @@ fn nested_savepoint_partial_rollback_partial_commit() {
     outer.commit();
 }
 
-// ============================================================================
-// Large allocations in savepoints
-// ============================================================================
-
 #[test]
 fn large_alloc_in_savepoint_committed() {
     let mut arena = Arena::with_capacity(128);
     let mut txn = arena.transaction();
     {
         let mut sp = txn.savepoint();
-        // 1 MiB — vastly exceeds initial capacity
         const MEBI: usize = 1024 * 1024;
         let big: &mut [u8] = sp.alloc_slice(vec![0xFFu8; MEBI]);
         assert_eq!(big.len(), MEBI);
@@ -524,7 +452,6 @@ fn large_alloc_in_savepoint_rolled_back() {
             let mut sp = txn.savepoint();
             const MEBI: usize = 1024 * 1024;
             let _ = sp.alloc_slice(vec![0u8; MEBI]);
-            // sp dropped → rolled back
         }
         assert_eq!(
             txn.bytes_used(),
@@ -535,21 +462,17 @@ fn large_alloc_in_savepoint_rolled_back() {
     }
 
     assert_eq!(arena.stats().bytes_allocated, 0);
-    // bytes_reserved grew but that's expected (blocks retained)
     let _ = before_res;
 }
 
-// ============================================================================
-// Extreme alignment (4096 bytes)
-// ============================================================================
-
 #[test]
 fn alloc_page_aligned_struct() {
+    #[allow(dead_code)]
     #[repr(align(4096))]
     struct PageAligned([u8; 4096]);
 
     let mut arena = Arena::with_capacity(64);
-    let _ = arena.alloc(1u8); // misalign
+    let _ = arena.alloc(1u8);
     let p = arena.alloc(PageAligned([0u8; 4096]));
     assert_eq!(
         p as *mut PageAligned as usize % 4096,
@@ -570,22 +493,16 @@ fn alloc_raw_4096_alignment() {
 fn alloc_4096_in_transaction() {
     let mut arena = Arena::new();
     let mut txn = arena.transaction();
-    let _ = txn.alloc(1u8); // misalign
+    let _ = txn.alloc(1u8);
     let ptr = txn.alloc_raw(128, 4096);
     assert_eq!(ptr.as_ptr() as usize % 4096, 0);
     txn.commit();
 }
 
-// ============================================================================
-// Panic-safe rollback
-// ============================================================================
-
 #[test]
 fn transaction_rolls_back_on_panic() {
     let mut arena = Arena::new();
 
-    // We need to test panic rollback without moving arena.
-    // Use a raw pointer to allow the closure to reference arena.
     let arena_ptr = &mut arena as *mut Arena;
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -617,33 +534,22 @@ fn nested_savepoint_panic_only_rolls_back_inner() {
     {
         let a = unsafe { &mut *arena_ptr };
         let mut txn = a.transaction();
-        let _ = txn.alloc(111u64); // outer alloc
+        let _ = txn.alloc(111u64);
         outer_bytes = txn.bytes_used();
 
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let inner_arena = unsafe { &mut *arena_ptr };
-            // We can't call txn.savepoint() here because we can't borrow txn
-            // across catch_unwind. Instead simulate by directly testing that
-            // a separate transaction panics and rolls back.
             let mut inner = inner_arena.transaction();
             let _ = inner.alloc(222u64);
             panic!("inner panic");
         }));
 
-        // outer transaction's allocation must still be accounted for
-        // (the inner transaction was a separate one from the arena directly)
         assert!(txn.bytes_used() >= outer_bytes);
         txn.commit();
     }
 
-    // arena should have outer's alloc (from the committed outer txn)
-    // but inner's alloc should have been rolled back by panic
     assert!(arena.stats().bytes_allocated >= 8, "outer alloc survived");
 }
-
-// ============================================================================
-// with_transaction and with_transaction_infallible
-// ============================================================================
 
 #[test]
 fn with_transaction_ok_commits() {
@@ -678,10 +584,6 @@ fn with_transaction_infallible_always_commits() {
     assert!(arena.stats().bytes_allocated >= 4);
 }
 
-// ============================================================================
-// ArenaVec integration
-// ============================================================================
-
 #[test]
 fn arena_vec_basic() {
     let mut arena = Arena::new();
@@ -702,13 +604,12 @@ fn arena_vec_finish_returns_arena_slice() {
         v.finish()
     };
     assert_eq!(slice, &[10, 20, 30]);
-    // arena is usable again
     let _ = arena.alloc(99u32);
 }
 
 #[test]
 fn arena_vec_grows_across_blocks() {
-    let mut arena = Arena::with_capacity(64); // tiny
+    let mut arena = Arena::with_capacity(64);
     let slice = {
         let mut v = ArenaVec::new(&mut arena);
         for i in 0u64..200 {
@@ -762,10 +663,6 @@ fn arena_vec_with_capacity_no_reallocate() {
     v.finish();
 }
 
-// ============================================================================
-// drop-tracking (feature-gated)
-// ============================================================================
-
 #[cfg(feature = "drop-tracking")]
 mod drop_tracking_tests {
     use super::*;
@@ -800,13 +697,12 @@ mod drop_tracking_tests {
     fn rewind_runs_only_post_checkpoint_destructors() {
         reset_counter();
         let mut arena = Arena::new();
-        let _ = arena.alloc(Tracked(1)); // before checkpoint
+        let _ = arena.alloc(Tracked(1));
         let cp = arena.checkpoint();
-        let _ = arena.alloc(Tracked(2)); // after checkpoint
-        let _ = arena.alloc(Tracked(3)); // after checkpoint
+        let _ = arena.alloc(Tracked(2));
+        let _ = arena.alloc(Tracked(3));
         assert_eq!(COUNTER.load(Ordering::Relaxed), 0);
         arena.rewind(cp);
-        // Only the 2 post-checkpoint objects should be dropped
         assert_eq!(COUNTER.load(Ordering::Relaxed), 2);
     }
 
@@ -842,7 +738,6 @@ mod drop_tracking_tests {
             let mut txn = arena.transaction();
             let _ = txn.alloc(Tracked(10));
             let _ = txn.alloc(Tracked(20));
-            // rolled back
         }
         assert_eq!(
             COUNTER.load(Ordering::Relaxed),
@@ -863,7 +758,7 @@ mod drop_tracking_tests {
         assert_eq!(
             COUNTER.load(Ordering::Relaxed),
             0,
-            "commit must NOT run destructors — deferred to reset/drop"
+            "commit must NOT run destructors"
         );
         arena.reset();
         assert_eq!(
@@ -891,10 +786,6 @@ mod drop_tracking_tests {
     }
 }
 
-// ============================================================================
-// Real-world: compiler IR builder
-// ============================================================================
-
 #[test]
 fn compiler_speculative_optimization_pass() {
     #[derive(Debug, PartialEq)]
@@ -907,8 +798,6 @@ fn compiler_speculative_optimization_pass() {
 
     let mut arena = Arena::new();
 
-    // Baseline IR — cast refs to raw pointers to allow multiple allocs
-    // in one closure (the borrow checker requires refs not outlive the borrow)
     let _base_nodes = arena.with_transaction_infallible(|txn| {
         let a = txn.alloc(Op::Const(10)) as *mut Op;
         let b = txn.alloc(Op::Const(20)) as *mut Op;
@@ -917,13 +806,11 @@ fn compiler_speculative_optimization_pass() {
     });
     let baseline_bytes = arena.stats().bytes_allocated;
 
-    // Speculative pass — not profitable, roll back
     {
         let mut txn = arena.transaction();
         for _ in 0..100 {
             let _ = txn.alloc(Op::Nop);
         }
-        // rolled back
     }
     assert_eq!(
         arena.stats().bytes_allocated,
@@ -931,7 +818,6 @@ fn compiler_speculative_optimization_pass() {
         "speculative pass must leave arena unchanged"
     );
 
-    // Profitable pass — commit
     arena
         .with_transaction(|txn| -> Result<(), ()> {
             let _ = txn.alloc(Op::Mul);
@@ -942,12 +828,9 @@ fn compiler_speculative_optimization_pass() {
     assert!(arena.stats().bytes_allocated > baseline_bytes);
 }
 
-// ============================================================================
-// Real-world: LSM memtable batch insert with abort
-// ============================================================================
-
 #[test]
 fn lsm_batch_insert_abort_leaves_no_trace() {
+    #[allow(dead_code)]
     #[derive(Debug)]
     struct KvEntry {
         key_ptr: *const u8,
@@ -957,7 +840,6 @@ fn lsm_batch_insert_abort_leaves_no_trace() {
 
     let mut arena = Arena::new();
 
-    // Batch 1: commit — store key as raw pointer to avoid multi-borrow
     arena
         .with_transaction(|txn| -> Result<(), &str> {
             let k1 = txn.alloc_str("apple") as *const str;
@@ -977,7 +859,6 @@ fn lsm_batch_insert_abort_leaves_no_trace() {
         .unwrap();
     let committed = arena.stats().bytes_allocated;
 
-    // Batch 2: abort (duplicate key detected mid-batch)
     let _ = arena.with_transaction(|txn| -> Result<(), &str> {
         let k = txn.alloc_str("cherry") as *const str;
         let _ = txn.alloc(KvEntry {
@@ -995,10 +876,6 @@ fn lsm_batch_insert_abort_leaves_no_trace() {
     );
 }
 
-// ============================================================================
-// Real-world: request-scoped allocator
-// ============================================================================
-
 #[test]
 fn request_scoped_allocator_reset_cycle() {
     let mut arena = Arena::new();
@@ -1006,7 +883,7 @@ fn request_scoped_allocator_reset_cycle() {
 
     for round in 0u32..20 {
         let ok = arena.with_transaction(|txn| -> Result<u32, &str> {
-            let id = *txn.alloc(round); // copy out value immediately
+            let id = *txn.alloc(round);
             let tag = txn.alloc_str("req-tag");
             let tag_len = tag.len() as u32;
             let _ = txn.alloc_slice(0u8..16u8);

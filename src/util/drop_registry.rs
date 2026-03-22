@@ -53,7 +53,7 @@ impl DropRegistry {
             if result.is_err() {
                 while self.entries.len() > target_len {
                     let (p, shim) = self.entries.pop().unwrap();
-                    unsafe { shim(p) };
+                    let _ = catch_unwind(AssertUnwindSafe(|| unsafe { shim(p) }));
                 }
                 std::panic::panic_any("DropRegistry: destructor panicked");
             }

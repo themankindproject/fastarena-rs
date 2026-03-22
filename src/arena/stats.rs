@@ -1,7 +1,7 @@
 /// A snapshot of arena memory usage returned by [`super::allocator::Arena::stats`].
 ///
 /// All counters are maintained incrementally; `stats()` is O(1).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ArenaStats {
     /// Bytes committed to live allocations, including alignment padding.
     /// Restored by [`super::allocator::Arena::rewind`] and zeroed by [`super::allocator::Arena::reset`].

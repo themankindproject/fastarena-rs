@@ -46,7 +46,7 @@ impl<T, const N: usize> InlineVec<T, N> {
         const { assert!(N > 0, "InlineVec requires N > 0") };
         InlineVec {
             data: Storage {
-                inline: ManuallyDrop::new(unsafe { std::mem::zeroed() }),
+                inline: ManuallyDrop::new(unsafe { std::mem::MaybeUninit::uninit().assume_init() }),
             },
             len: 0,
             on_heap: false,

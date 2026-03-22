@@ -28,11 +28,6 @@ impl Block {
         })
     }
 
-    /// Try to allocate `size` bytes at `align` alignment.
-    ///
-    /// Returns `(ptr, delta)` where `delta` is the increase in `self.offset`
-    /// including any alignment padding. The caller uses `delta` to maintain an
-    /// incremental `bytes_allocated` counter.
     #[inline]
     pub(crate) fn try_alloc(&mut self, size: usize, align: usize) -> Option<(NonNull<u8>, usize)> {
         let aligned = align_up(self.base + self.offset, align);
@@ -91,7 +86,7 @@ mod tests {
         let mut b = Block::new(256);
         b.try_alloc(1, 1).unwrap();
         let (_, d) = b.try_alloc(8, 8).unwrap();
-        assert_eq!(d, 15); // 7 padding + 8 payload
+        assert_eq!(d, 15);
     }
 
     #[test]

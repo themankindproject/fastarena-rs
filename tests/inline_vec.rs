@@ -2,8 +2,6 @@ use std::alloc::{alloc, dealloc, Layout};
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ptr;
 
-/// Heap storage descriptor, stored in the union when spilled.
-#[derive(Clone, Copy)]
 struct HeapBuf<T> {
     ptr: *mut T,
     cap: usize,
@@ -14,12 +12,6 @@ union Storage<T, const N: usize> {
     heap: ManuallyDrop<HeapBuf<T>>,
 }
 
-/// A growable vector that stores the first `N` elements inline (no heap
-/// allocation) and spills to a heap buffer only when that capacity is exceeded.
-///
-/// Used internally for `Arena::blocks` (`N = 8`) and `DropRegistry::entries`
-/// (`N = 32`). Typical arena workloads never exceed these limits, so no heap
-/// allocation occurs for either collection during the arena's lifetime.
 pub(crate) struct InlineVec<T, const N: usize> {
     data: Storage<T, N>,
     len: usize,
@@ -43,6 +35,7 @@ impl<T, const N: usize> InlineVec<T, N> {
         }
     }
 
+    #[allow(dead_code)]
     #[inline]
     pub(crate) fn len(&self) -> usize {
         self.len

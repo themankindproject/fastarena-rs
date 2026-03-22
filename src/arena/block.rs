@@ -65,7 +65,7 @@ impl Block {
         Some((unsafe { NonNull::new_unchecked(aligned as *mut u8) }, delta))
     }
 
-    /// Returns the number of bytes remaining in this block.
+    /// Returns the number of bytes remaining in this block for allocation.
     #[allow(dead_code)]
     #[inline]
     pub(crate) fn remaining(&self) -> usize {

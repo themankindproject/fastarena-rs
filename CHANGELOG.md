@@ -105,7 +105,7 @@ Initial release of fastarena, a high-performance bump-pointer arena allocator wi
 ### Design Principles
 
 - **Zero dependencies** - `std` only, no external crates
-- **`no_std` ready** - Uses `no-std` compatible keywords (full `no_std` support may require additional work)
+
 - **RAII guarantees** - Borrow checker prevents use-after-rewind at compile time
 - **Zero-cost abstractions** - All stats maintained incrementally; no runtime overhead for safety checks
 - **Memory efficiency** - Inline storage for small workloads eliminates heap allocations

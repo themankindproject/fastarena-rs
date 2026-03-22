@@ -3,34 +3,7 @@ use std::mem;
 use std::ptr::{self, NonNull};
 
 use fastarena::Arena;
-/// An append-only growable vector backed by arena memory.
-///
-/// Elements 0..`capacity` are stored in a single arena allocation. Growth
-/// copies elements to a larger allocation and abandons the old one — the arena
-/// reclaims both on `reset`. This gives amortised O(1) push with the same
-/// cache locality as a `Vec`.
-///
-/// # Destructor behaviour
-///
-/// - **`finish()`** → elements are arena-owned; `ArenaVec` does not run their
-///   destructors. If `drop-tracking` is enabled they will be dropped by
-///   [`Arena::reset`] / [`Arena::rewind`].
-/// - **`drop` without `finish()`** → element destructors run immediately. The
-///   backing memory is not freed (the arena retains it).
-///
-/// # Example
-///
-/// ```rust
-/// use fastarena::{Arena, ArenaVec};
-///
-/// let mut arena = Arena::new();
-/// let slice: &mut [u32] = {
-///     let mut v = ArenaVec::new(&mut arena);
-///     v.push(1); v.push(2); v.push(3);
-///     v.finish()
-/// };
-/// assert_eq!(slice, &[1, 2, 3]);
-/// ```
+
 pub struct ArenaVec<'arena, T> {
     arena: &'arena mut Arena,
     ptr: NonNull<T>,
@@ -40,7 +13,6 @@ pub struct ArenaVec<'arena, T> {
 }
 
 impl<'arena, T> ArenaVec<'arena, T> {
-    /// Create an empty `ArenaVec`. No allocation is made until the first push.
     pub fn new(arena: &'arena mut Arena) -> Self {
         ArenaVec {
             arena,
@@ -51,8 +23,6 @@ impl<'arena, T> ArenaVec<'arena, T> {
         }
     }
 
-    /// Create an `ArenaVec` pre-allocated for `cap` elements, avoiding growth
-    /// copies when the final size is known upfront.
     pub fn with_capacity(arena: &'arena mut Arena, cap: usize) -> Self {
         let mut v = ArenaVec::new(arena);
         if cap > 0 && mem::size_of::<T>() > 0 {
@@ -63,7 +33,6 @@ impl<'arena, T> ArenaVec<'arena, T> {
         v
     }
 
-    /// Append `val`. Amortised O(1).
     #[inline]
     pub fn push(&mut self, val: T) {
         if self.len == self.cap {
@@ -73,7 +42,6 @@ impl<'arena, T> ArenaVec<'arena, T> {
         self.len += 1;
     }
 
-    /// Remove and return the last element, or `None` if empty.
     pub fn pop(&mut self) -> Option<T> {
         if self.len == 0 {
             return None;
@@ -82,7 +50,6 @@ impl<'arena, T> ArenaVec<'arena, T> {
         Some(unsafe { self.ptr.as_ptr().add(self.len).read() })
     }
 
-    /// Append all items from `iter`.
     pub fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         for item in iter {
             self.push(item);
@@ -112,9 +79,6 @@ impl<'arena, T> ArenaVec<'arena, T> {
         unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
     }
 
-    /// Consume the `ArenaVec`, returning a `&'arena mut [T]` backed by arena
-    /// memory. The arena borrow is released; element destructors will **not**
-    /// be called by `ArenaVec` after this point.
     pub fn finish(self) -> &'arena mut [T] {
         let ptr = self.ptr.as_ptr();
         let len = self.len;

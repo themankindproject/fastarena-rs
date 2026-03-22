@@ -9,8 +9,8 @@ repository   = "https://github.com/themankindproject/fastarena"
 homepage     = "https://github.com/themankindproject/fastarena"
 documentation = "https://docs.rs/fastarena"
 readme       = "README.md"
-keywords     = ["arena", "allocator", "bump", "memory", "no-std"]
-categories   = ["memory-management", "no-std", "data-structures"]
+keywords     = ["arena", "allocator", "bump", "memory"]
+categories   = ["memory-management", "data-structures"]
 exclude      = [
     ".github/**",
     "benches/**",

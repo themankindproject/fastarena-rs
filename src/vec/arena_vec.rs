@@ -1,16 +1,22 @@
-use std::marker::PhantomData;
-use std::mem::{self, ManuallyDrop};
-use std::ptr::{self, NonNull};
+use core::marker::PhantomData;
+use core::mem::{self, ManuallyDrop};
+use core::ptr::{self, NonNull};
 
 use crate::arena::Arena;
 
 /// Error returned by [`ArenaVec::try_reserve`] when allocation fails.
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TryReserveError {
     /// Computed capacity would overflow `usize`.
     CapacityOverflow,
     /// The arena is out of memory.
     AllocError,
+}
+
+impl From<core::alloc::LayoutError> for TryReserveError {
+    fn from(_: core::alloc::LayoutError) -> Self {
+        TryReserveError::CapacityOverflow
+    }
 }
 
 /// An append-only growable vector backed by arena memory.
@@ -289,7 +295,7 @@ impl<'arena, T> ArenaVec<'arena, T> {
     /// The slice length equals `self.len()` at the time of the call.
     #[inline(always)]
     pub fn as_slice(&self) -> &[T] {
-        unsafe { std::slice::from_raw_parts(self.ptr.as_ptr() as *const T, self.len) }
+        unsafe { core::slice::from_raw_parts(self.ptr.as_ptr() as *const T, self.len) }
     }
 
     /// Returns a mutable slice view of the vector's current contents.
@@ -297,7 +303,7 @@ impl<'arena, T> ArenaVec<'arena, T> {
     /// The slice length equals `self.len()` at the time of the call.
     #[inline(always)]
     pub fn as_mut_slice(&mut self) -> &mut [T] {
-        unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
+        unsafe { core::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
     }
 
     /// Consume the `ArenaVec`, returning a `&'arena mut [T]` backed by arena
@@ -305,7 +311,7 @@ impl<'arena, T> ArenaVec<'arena, T> {
     /// be called by `ArenaVec` after this point.
     pub fn finish(self) -> &'arena mut [T] {
         let this = ManuallyDrop::new(self);
-        unsafe { std::slice::from_raw_parts_mut(this.ptr.as_ptr(), this.len) }
+        unsafe { core::slice::from_raw_parts_mut(this.ptr.as_ptr(), this.len) }
     }
 
     fn grow(&mut self) {
@@ -337,7 +343,7 @@ impl<'arena, T> ArenaVec<'arena, T> {
     }
 }
 
-impl<T> std::ops::Index<usize> for ArenaVec<'_, T> {
+impl<T> core::ops::Index<usize> for ArenaVec<'_, T> {
     type Output = T;
     fn index(&self, i: usize) -> &T {
         assert!(i < self.len, "index {i} out of bounds (len={})", self.len);
@@ -345,7 +351,7 @@ impl<T> std::ops::Index<usize> for ArenaVec<'_, T> {
     }
 }
 
-impl<T> std::ops::IndexMut<usize> for ArenaVec<'_, T> {
+impl<T> core::ops::IndexMut<usize> for ArenaVec<'_, T> {
     fn index_mut(&mut self, i: usize) -> &mut T {
         assert!(i < self.len, "index {i} out of bounds (len={})", self.len);
         unsafe { &mut *self.ptr.as_ptr().add(i) }
@@ -403,7 +409,7 @@ impl<'arena, T> ExactSizeIterator for ArenaVecIntoIter<'arena, T> {}
 
 impl<'arena, T> IntoIterator for &'arena ArenaVec<'arena, T> {
     type Item = &'arena T;
-    type IntoIter = std::slice::Iter<'arena, T>;
+    type IntoIter = core::slice::Iter<'arena, T>;
     fn into_iter(self) -> Self::IntoIter {
         self.as_slice().iter()
     }
@@ -411,7 +417,7 @@ impl<'arena, T> IntoIterator for &'arena ArenaVec<'arena, T> {
 
 impl<'arena, T> IntoIterator for &'arena mut ArenaVec<'arena, T> {
     type Item = &'arena mut T;
-    type IntoIter = std::slice::IterMut<'arena, T>;
+    type IntoIter = core::slice::IterMut<'arena, T>;
     fn into_iter(self) -> Self::IntoIter {
         self.as_mut_slice().iter_mut()
     }
@@ -420,7 +426,7 @@ impl<'arena, T> IntoIterator for &'arena mut ArenaVec<'arena, T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use core::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn push_and_index() {

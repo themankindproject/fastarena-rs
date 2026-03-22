@@ -16,7 +16,7 @@ A zero-dependency bump-pointer arena allocator with RAII transactions, nested sa
 | **O(1) allocation** | Single bounds check + bump pointer advance |
 | **Zero-cost reset** | Reuse all memory without OS calls or page faults |
 | **Transactions** | RAII guard with commit/rollback, nested savepoints |
-| **No_std ready** | Zero dependencies, `std` only |
+
 
 ## Quick Start
 
