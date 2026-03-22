@@ -1,8 +1,8 @@
-# FastArena
+# fastarena
 
 [![Crates.io](https://img.shields.io/crates/v/fastarena)](https://crates.io/crates/fastarena)
 [![Documentation](https://docs.rs/fastarena/badge.svg)](https://docs.rs/fastarena)
-[![License](https://img.shields.io/crates/l/fastarena)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/themankindproject/fastarena-rs/ci.yml)](https://github.com/themankindproject/fastarena-rs/actions)
 ![Rust Version](https://img.shields.io/badge/rust-1.66%2B-blue)
 
@@ -16,154 +16,193 @@ A zero-dependency bump-pointer arena allocator with RAII transactions, nested sa
 | **O(1) allocation** | Single bounds check + bump pointer advance |
 | **Zero-cost reset** | Reuse all memory without OS calls or page faults |
 | **Transactions** | RAII guard with commit/rollback, nested savepoints |
-
+| **Drop-tracking** | Opt-in destructor execution — zero-cost when off |
+| **Budget enforcement** | Cap bytes per transaction for request-scoped safety |
 
 ## Quick Start
+
+### Basic Allocation
 
 ```rust
 use fastarena::Arena;
 
 let mut arena = Arena::new();
 
-// O(1) allocation
 let x: &mut u64 = arena.alloc(42);
-assert_eq!(*x, 42);
-
-// Slice from iterator
 let squares: &mut [u32] = arena.alloc_slice(0u32..8);
-
-// Interned string
 let s: &str = arena.alloc_str("hello");
 
-// Zero-cost reset — pages stay warm
+// Zero-cost reset — pages stay warm, no OS calls
 arena.reset();
+```
+
+### Transactions — Auto-Rollback on Failure
+
+No other arena allocator gives you RAII transactions. Allocations succeed or roll back as a unit — no leaks, no manual cleanup.
+
+```rust
+use fastarena::Arena;
+
+let mut arena = Arena::new();
+
+// Ok commits, Err rolls back — all allocations are atomic
+let result: Result<u32, &str> = arena.with_transaction(|txn| {
+    let name = txn.alloc_str("fastarena");
+    let score = txn.alloc(100u32);
+    Ok(*score)
+});
+assert_eq!(result, Ok(100));
+
+// Failed transaction — everything allocated inside is gone
+arena.with_transaction(|txn| {
+    txn.alloc(1u32);
+    txn.alloc(2u32);
+    Err("abort")  // both u32s rolled back automatically
+});
+
+// Infallible variant — commits even through panic
+let val = arena.with_transaction_infallible(|txn| {
+    *txn.alloc(7u32) * 6
+});
+assert_eq!(val, 42);
+```
+
+### Nested Savepoints
+
+Transactions nest to arbitrary depth. Each savepoint is independently committable — roll back an inner scope without losing outer work.
+
+```rust
+use fastarena::Arena;
+
+let mut arena = Arena::new();
+let mut outer = arena.transaction();
+let parser_ast = outer.alloc_str("top-level");
+
+{
+    let mut inner = outer.savepoint();
+    inner.alloc_str("speculative-opt");
+    inner.alloc(999u32);
+    // dropped without commit — inner work discarded, outer untouched
+}
+
+let final_ast = outer.alloc_str("confirmed");
+outer.commit();  // parser_ast + final_ast survive
+```
+
+### ArenaVec with `finish()` — Transfer Ownership to the Arena
+
+`ArenaVec` is a growable vector backed by arena memory. Call `finish()` to hand ownership to the arena — no destructor run, no copy. The slice lives as long as the arena.
+
+```rust
+use fastarena::Arena;
+use fastarena::ArenaVec;
+
+let mut arena = Arena::new();
+
+let items: &mut [u32] = {
+    let mut v = ArenaVec::new(&mut arena);
+    for i in 0..1024 {
+        v.push(i);
+    }
+    v.finish()  // ArenaVec consumed, slice now arena-owned
+};
+
+assert_eq!(items.len(), 1024);
+assert_eq!(items[512], 512);
+```
+
+### Transaction Budgets — Cap Memory per Request
+
+Set a byte budget on any transaction. Exceed it and `alloc` panics (or `try_alloc` returns `None`). Zero-cost when unlimited.
+
+```rust
+use fastarena::Arena;
+
+let mut arena = Arena::new();
+let mut txn = arena.transaction();
+txn.set_limit(4096);  // hard cap
+
+txn.alloc(vec![0u8; 2048]);  // ok
+// txn.alloc(vec![0u8; 4096]);  // panics: budget exceeded
+let remaining = txn.budget_remaining();  // introspect at any time
+txn.commit();
+```
+
+### Drop-Tracking — Opt-In Destructor Execution
+
+By default, fastarena never runs destructors (zero overhead). Enable `drop-tracking` to run them in LIFO order on `reset()` / `rewind()`.
+
+```toml
+[dependencies]
+fastarena = { version = "0.1", features = ["drop-tracking"] }
+```
+
+```rust
+use fastarena::Arena;
+
+let mut arena = Arena::new();
+let cp = arena.checkpoint();
+
+arena.alloc(String::from("hello"));
+arena.alloc(String::from("world"));
+
+// With drop-tracking: drops fire in LIFO order ("world", then "hello")
+// Without drop-tracking: no destructors, memory reclaimed instantly
+arena.rewind(cp);
 ```
 
 ## Use Cases
 
-### Compiler AST Allocation
+- **Compiler AST / parsers** — allocate all nodes per pass, reset in bulk
+- **Graphs and cyclic structures** — same-lifetime references enable safe cycles without `Rc`/`RefCell`
+- **Trees with parent pointers** — back-references trivially supported
+- **Heterogeneous types** — allocate `Node`, `Edge`, `Token` in a single arena
+- **Phase-oriented bulk alloc/free** — many objects created, bulk-freed via `reset()` or `rewind()`
+- **Request-scoped memory** — thread-local arena per HTTP request, zero-cost recycle
+- **Transactional batch processing** — commit on success, auto-rollback on failure, nested savepoints
+- **Dynamic collections** — `ArenaVec` with O(1) push, arena-backed lifetime
 
-```rust
-use fastarena::Arena;
-
-struct Compiler<'a> {
-    arena: Arena,
-    // ... other fields
-}
-
-impl<'a> Compiler<'a> {
-    fn new() -> Self {
-        Self { arena: Arena::with_capacity(1024 * 1024) }
-    }
-    
-    fn compile(&mut self, source: &str) {
-        // All AST nodes allocated in arena
-        let ast = self.parse(source);
-        self.optimize(ast);
-        self.codegen(ast);
-        self.arena.reset(); // Free entire compilation
-    }
-}
-```
-
-### Request-Scoped Memory (Web Servers)
-
-```rust
-use std::cell::RefCell;
-use fastarena::Arena;
-
-thread_local! {
-    static ARENA: RefCell<Arena> = RefCell::new(Arena::with_capacity(256 * 1024));
-}
-
-fn handle_request(req: Request) -> Response {
-    ARENA.with(|a| {
-        let mut arena = a.borrow_mut();
-        // Parse and process request in arena
-        let parsed = parse_request(&mut arena, &req);
-        let result = process(&mut arena, parsed);
-        arena.reset(); // Zero-cost recycle
-        result
-    })
-}
-```
-
-### Transactional Batch Processing
-
-```rust
-use fastarena::Arena;
-
-let mut arena = Arena::new();
-
-// Commits on Ok, rolls back on Err
-let result = arena.with_transaction(|txn| -> Result<u32, &str> {
-    Ok(*txn.alloc(21) * 2)
-});
-assert_eq!(result, Ok(42));
-
-// Manual — auto-rollback on drop
-{
-    let mut txn = arena.transaction();
-    txn.alloc(99);
-    // dropped → rolled back
-}
-
-// Nested savepoints
-let mut outer = arena.transaction();
-outer.alloc(1);
-{
-    let mut inner = outer.savepoint();
-    inner.alloc(2);
-    // dropped → only inner rolled back
-}
-outer.commit();
-```
-
-### ArenaVec for Dynamic Collections
-
-```rust
-use fastarena::{Arena, ArenaVec};
-
-let mut arena = Arena::new();
-
-let slice: &mut [u64] = {
-    let mut v = ArenaVec::with_capacity(&mut arena, 16);
-    for i in 0u64..16 { v.push(i * i); }
-    v.finish()
-};
-
-assert_eq!(slice[15], 225);
-```
+See [USAGE.md](USAGE.md) for full examples.
 
 ## Performance
 
-### Benchmark Results (vs bumpalo, typed-arena)
+### Head-to-head: fastarena vs bumpalo vs typed-arena
 
-| Benchmark | fastarena | bumpalo | typed-arena | Winner |
-|-----------|-----------|---------|-------------|--------|
-| alloc 1k items | 1881 ns | 925 ns | 994 ns | bumpalo |
-| alloc_slice n=64 | **12 ns** | 49 ns | 72 ns | **fastarena** |
-| alloc_slice n=1024 | **65 ns** | 510 ns | — | **fastarena** |
-| ArenaVec n=256 | **174 ns** | 280 ns | 366 ns | **fastarena** |
-| ArenaVec n=4096 | **2.2 µs** | 8.2 µs | 10.0 µs | **fastarena** |
-| 10k allocs + reset | 17.1 µs | 14.5 µs | 2.6 µs | typed-arena* |
-| large 128KB alloc | 59 ns | 27 ns | — | bumpalo |
+| Benchmark | fastarena | bumpalo | typed-arena |
+|-----------|-----------|---------|-------------|
+| alloc 1k items | **863 ns** | 897 ns | 988 ns |
+| alloc_slice n=64 | **12 ns** | 53 ns | 78 ns |
+| alloc_slice n=1024 | **63 ns** | 531 ns | — |
+| alloc_str (100x) | 199 ns | **176 ns** | — |
+| ArenaVec n=16 | **25 ns** | 39 ns | 27 ns |
+| ArenaVec n=256 | **231 ns** | 291 ns | 406 ns |
+| ArenaVec n=4096 | **3.4 µs** | 8.4 µs | 9.2 µs |
+| 10k allocs + reset | **14.1 µs** | 14.4 µs | 2.6 µs† |
+| reset (1 block) | 830 ns | **613 ns** | — |
+| 128 KB alloc | 57 ns | **25 ns** | — |
 
-*typed-arena reallocates fresh each iteration; not comparable.
+† typed-arena drops and re-creates the arena each iteration; not directly comparable.
+
+### Fast path benchmarks (vs std Box/Vec)
+
+| Benchmark | fastarena | Box/Vec | Speedup |
+|-----------|-----------|---------|---------|
+| alloc 1k u64 | **822 ns** | 15479 ns | **19x** |
+| alloc_slice n=512 | **55 ns** | 59 ns | ~1x |
+| alloc_slice n=4096 | **231 ns** | 215 ns | ~1x |
+| 10k allocs + reset | **13.4 µs** | 155.5 µs | **12x** |
+| `Arena::new` | **18 ns** | — | — |
+| `checkpoint()` | **87 ns** | — | — |
+| `reset` 1 block | **20 ns** | — | — |
+| `commit` 16 allocs | **1.3 µs** | — | — |
 
 ### Why fastarena excels
 
-- **Slice allocation**: 4-8x faster than bumpalo due to batch `write()` in a tight loop
-- **ArenaVec**: 3-4x faster for building collections vs bumpalo Vec  
-- **Cache locality**: Single bump pointer keeps allocations contiguous
+- **4-8x faster slice allocation** than bumpalo (batch write in tight loop)
+- **2.5x faster ArenaVec** than bumpalo/typed-arena for bulk collection building
+- **Tied on alloc** — on par with bumpalo for single-item allocation
+- **12x faster than Box** for bulk alloc + reclaim cycles
 - **Zero dependencies**: No external crates required
-
-| Operation | Time | vs Box/Vec |
-|-----------|------|------------|
-| `alloc` | ~1.7 µs | **10x faster** |
-| `alloc_slice n=64` | ~35 ns | **2x faster** |
-| `reset` | ~24 ns | — |
-| 10k allocs + reset | ~17 ms | **10x faster** |
 
 ## Feature Flags
 
@@ -185,18 +224,3 @@ fastarena = { version = "0.1", features = ["drop-tracking"] }
 ## Documentation
 
 See [USAGE.md](USAGE.md) for complete API reference.
-
-## Minimum Supported Rust Version (MSRV)
-
-**Rust 1.66.0** — Stable since January 2022.
-
-## License
-
-MIT — See [LICENSE](LICENSE) file.
-
-## Links
-
-- [Crates.io](https://crates.io/crates/fastarena)
-- [Documentation](https://docs.rs/fastarena)
-- [Repository](https://github.com/themankindproject/fastarena-rs)
-- [Changelog](CHANGELOG.md)
