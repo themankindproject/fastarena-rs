@@ -163,11 +163,10 @@ impl Arena {
         unsafe {
             let start = ptr.as_ptr() as *mut T;
             for i in 0..len {
-                let elem = start.add(i);
-                elem.write(iter.next().unwrap_unchecked());
-                #[cfg(feature = "drop-tracking")]
-                self.drop_registry.register(elem);
+                start.add(i).write(iter.next().unwrap_unchecked());
             }
+            #[cfg(feature = "drop-tracking")]
+            self.drop_registry.register_slice(start, len);
             std::slice::from_raw_parts_mut(start, len)
         }
     }
@@ -284,11 +283,10 @@ impl Arena {
         Some(unsafe {
             let start = ptr.as_ptr() as *mut T;
             for i in 0..len {
-                let elem = start.add(i);
-                elem.write(iter.next().unwrap_unchecked());
-                #[cfg(feature = "drop-tracking")]
-                self.drop_registry.register(elem);
+                start.add(i).write(iter.next().unwrap_unchecked());
             }
+            #[cfg(feature = "drop-tracking")]
+            self.drop_registry.register_slice(start, len);
             std::slice::from_raw_parts_mut(start, len)
         })
     }
@@ -407,7 +405,7 @@ impl Arena {
     /// Execute an infallible closure inside a transaction; always commits,
     /// even if the closure panics. The panic is re-raised after the commit.
     ///
-    /// If you want rollback-on-panic, use [`with_transaction`] instead.
+    /// If you want rollback-on-panic, use [`Arena::with_transaction`] instead.
     #[inline]
     pub fn with_transaction_infallible<F, T>(&mut self, f: F) -> T
     where
@@ -427,7 +425,7 @@ impl Arena {
     /// Register a raw pointer for destructor execution.
     ///
     /// Only available with the `drop-tracking` feature. Call this after
-    /// [`alloc_uninit`] once the value is fully initialised.
+    /// [`Arena::alloc_uninit`] once the value is fully initialised.
     ///
     /// # Safety
     ///
