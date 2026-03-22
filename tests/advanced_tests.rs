@@ -670,6 +670,7 @@ mod drop_tracking_tests {
 
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
+    #[allow(dead_code)]
     struct Tracked(usize);
     impl Drop for Tracked {
         fn drop(&mut self) {
@@ -774,7 +775,7 @@ mod drop_tracking_tests {
         let mut arena = Arena::new();
         let cp = arena.checkpoint();
         {
-            let items = (0..5).map(|i| Tracked(i));
+            let items = (0..5).map(Tracked);
             let _ = arena.alloc_slice(items);
         }
         arena.rewind(cp);

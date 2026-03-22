@@ -68,12 +68,6 @@ impl Block {
     pub(crate) fn remaining(&self) -> usize {
         self.capacity - self.offset
     }
-
-    /// Resets the block by setting offset back to 0, making all memory available.
-    #[inline]
-    pub(crate) fn reset(&mut self) {
-        self.offset = 0;
-    }
 }
 
 impl Drop for Block {
@@ -124,7 +118,7 @@ mod tests {
     fn reset_reuse() {
         let mut b = Block::new(64);
         let (p1, _) = b.try_alloc(32, 8).unwrap();
-        b.reset();
+        b.offset = 0;
         let (p2, _) = b.try_alloc(32, 8).unwrap();
         assert_eq!(p1.as_ptr(), p2.as_ptr());
     }

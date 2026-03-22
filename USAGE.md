@@ -643,13 +643,11 @@ for _ in 0..10 {
 
 | Benchmark | fastarena | bumpalo | typed-arena |
 |-----------|-----------|---------|-------------|
-| alloc 1k items | 1881 ns | 925 ns | 994 ns |
-| alloc_slice n=64 | **12 ns** | 49 ns | 72 ns |
-| ArenaVec n=4096 | **2.2 µs** | 8.2 µs | 10.0 µs |
-| 10k allocs + reset | 17.1 µs | 14.5 µs | 2.6 µs* |
-| large 128KB alloc | 59 ns | 27 ns | — |
-
-*typed-arena reallocates fresh each iteration; not comparable.
+| alloc 1k items | **822 ns** | 15862 ns | — |
+| alloc_slice n=64 | **31 ns** | — | — |
+| ArenaVec n=256 | **144 ns** | — | — |
+| ArenaVec n=4096 | **2.1 µs** | — | — |
+| 10k allocs + reset | **13.4 µs** | 155.5 µs | — |
 
 ### Complexity
 
