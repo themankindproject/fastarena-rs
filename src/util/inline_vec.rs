@@ -63,7 +63,7 @@ impl<T, const N: usize> InlineVec<T, N> {
         if !self.on_heap {
             if self.len < N {
                 unsafe { (*self.data.inline)[self.len].write(val) };
-                self.len = self.len.saturating_add(1);
+                self.len += 1;
                 return;
             }
             self.promote_and_push(val);
@@ -72,7 +72,7 @@ impl<T, const N: usize> InlineVec<T, N> {
                 self.heap_grow();
             }
             unsafe { (*self.data.heap).ptr.add(self.len).write(val) };
-            self.len = self.len.saturating_add(1);
+            self.len += 1;
         }
     }
 

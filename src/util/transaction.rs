@@ -75,12 +75,11 @@ impl<'arena> Transaction<'arena> {
     /// Uses `ManuallyDrop` to prevent `Drop` from ever running — rollback after
     /// commit is impossible.
     pub fn commit(self) -> TxnStatus {
-        let mut this = ManuallyDrop::new(self);
+        let this = ManuallyDrop::new(self);
         unsafe {
             let arena_ptr: *mut Arena = this.arena as *const _ as *mut _;
             (*arena_ptr).txn_depth = (*arena_ptr).txn_depth.wrapping_sub(1);
         }
-        this.committed = true;
         TxnStatus::Committed
     }
 
@@ -361,7 +360,9 @@ where
 /// Execute an infallible closure within a transaction on the given arena.
 ///
 /// Unlike [`run_with_transaction`], this function always commits, even if the
-/// closure panics. The panic is propagated after rollback completes.
+/// closure panics. The panic is re-raised after the commit.
+///
+/// If you want rollback-on-panic, use [`run_with_transaction`] instead.
 ///
 /// # Example
 ///

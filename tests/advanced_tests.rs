@@ -600,7 +600,7 @@ fn arena_vec_finish_returns_arena_slice() {
     let mut arena = Arena::new();
     let slice = {
         let mut v = ArenaVec::new(&mut arena);
-        v.extend([10u64, 20, 30]);
+        v.extend_exact([10u64, 20, 30]);
         v.finish()
     };
     assert_eq!(slice, &[10, 20, 30]);
@@ -630,7 +630,7 @@ fn arena_vec_inside_transaction_committed() {
     {
         let v = {
             let mut av = ArenaVec::new(txn.arena_mut());
-            av.extend([1u32, 2, 3]);
+            av.extend_exact([1u32, 2, 3]);
             av.finish()
         };
         assert_eq!(v, &[1, 2, 3]);
@@ -643,7 +643,7 @@ fn arena_vec_inside_transaction_committed() {
 fn arena_vec_pop_correctness() {
     let mut arena = Arena::new();
     let mut v = ArenaVec::new(&mut arena);
-    v.extend([1u32, 2, 3]);
+    v.extend_exact([1u32, 2, 3]);
     assert_eq!(v.pop(), Some(3));
     assert_eq!(v.pop(), Some(2));
     assert_eq!(v.pop(), Some(1));

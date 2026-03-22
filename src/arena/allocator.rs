@@ -79,6 +79,7 @@ pub struct Arena {
     pub(crate) drop_registry: DropRegistry,
     #[cfg(not(feature = "drop-tracking"))]
     _drop_registry: (),
+    cur_base: usize,
     cur_ptr: *mut u8,
     cur_end: *mut u8,
 }
@@ -111,6 +112,7 @@ impl Arena {
             drop_registry: DropRegistry::new(),
             #[cfg(not(feature = "drop-tracking"))]
             _drop_registry: (),
+            cur_base: base,
             cur_ptr: base as *mut u8,
             cur_end: (base + capacity) as *mut u8,
         }
@@ -294,8 +296,17 @@ impl Arena {
     /// Fallible variant of [`alloc_str`](Arena::alloc_str).
     #[inline]
     pub fn try_alloc_str(&mut self, s: &str) -> Option<&str> {
-        let bytes = self.try_alloc_slice(s.bytes())?;
-        Some(unsafe { std::str::from_utf8_unchecked(bytes) })
+        if s.is_empty() {
+            return Some("");
+        }
+        let ptr = self.try_alloc_raw_inner(s.len(), 1)?;
+        unsafe {
+            core::ptr::copy_nonoverlapping(s.as_ptr(), ptr.as_ptr(), s.len());
+            Some(core::str::from_utf8_unchecked(core::slice::from_raw_parts(
+                ptr.as_ptr(),
+                s.len(),
+            )))
+        }
     }
 
     /// Fallible variant of [`alloc_raw`](Arena::alloc_raw).
@@ -313,7 +324,7 @@ impl Arena {
     /// Capture the current allocation position as an opaque [`Checkpoint`].
     #[inline(always)]
     pub fn checkpoint(&self) -> Checkpoint {
-        let current_offset = self.cur_ptr as usize - self.blocks[self.current].base;
+        let current_offset = self.cur_ptr as usize - self.cur_base;
         Checkpoint {
             block_idx: self.current,
             offset: current_offset,
@@ -393,10 +404,10 @@ impl Arena {
         run_with_transaction(self, f)
     }
 
-    /// Execute an infallible closure inside a transaction; always commits.
+    /// Execute an infallible closure inside a transaction; always commits,
+    /// even if the closure panics. The panic is re-raised after the commit.
     ///
-    /// If the closure panics, the transaction rolls back via `Drop` before
-    /// the panic propagates.
+    /// If you want rollback-on-panic, use [`with_transaction`] instead.
     #[inline]
     pub fn with_transaction_infallible<F, T>(&mut self, f: F) -> T
     where
@@ -478,6 +489,8 @@ impl Arena {
 
     #[cold]
     fn alloc_slow(&mut self, size: usize, align: usize) -> NonNull<u8> {
+        self.blocks[self.current].offset = self.cur_ptr as usize - self.cur_base;
+
         for i in (self.current + 1)..self.blocks.len() {
             let block = &mut self.blocks[i];
             if let Some((ptr, delta)) = block.try_alloc(size, align) {
@@ -500,6 +513,8 @@ impl Arena {
 
     #[cold]
     fn alloc_slow_try(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
+        self.blocks[self.current].offset = self.cur_ptr as usize - self.cur_base;
+
         for i in (self.current + 1)..self.blocks.len() {
             let block = &mut self.blocks[i];
             if let Some((ptr, delta)) = block.try_alloc(size, align) {
@@ -522,6 +537,7 @@ impl Arena {
     fn set_current_block(&mut self, idx: usize) {
         let block = &self.blocks[idx];
         self.current = idx;
+        self.cur_base = block.base;
         self.cur_ptr = (block.base + block.offset) as *mut u8;
         self.cur_end = (block.base + block.capacity) as *mut u8;
     }

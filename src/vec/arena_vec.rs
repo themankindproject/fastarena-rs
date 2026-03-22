@@ -116,7 +116,7 @@ impl<'arena, T> ArenaVec<'arena, T> {
     /// Requires `ExactSizeIterator` to pre-compute capacity and avoid repeated
     /// reallocation during growth.
     #[inline]
-    pub fn extend<I>(&mut self, iter: I)
+    pub fn extend_exact<I>(&mut self, iter: I)
     where
         I: IntoIterator<Item = T>,
         I::IntoIter: ExactSizeIterator,
@@ -238,7 +238,13 @@ impl<'arena, T> ArenaVec<'arena, T> {
     ///
     /// Panics if the new capacity overflows `usize`.
     pub fn reserve_exact(&mut self, additional: usize) {
-        self.reserve(additional);
+        let required = self
+            .len
+            .checked_add(additional)
+            .expect("ArenaVec: capacity overflow");
+        if required > self.cap {
+            self.grow_to(required);
+        }
     }
 
     /// Attempts to reserve capacity for at least `additional` more elements.
@@ -371,7 +377,7 @@ impl<T> Drop for ArenaVec<'_, T> {
 impl<'arena, T> Extend<T> for ArenaVec<'arena, T> {
     /// Extends the vector by consuming items from the iterator one by one.
     ///
-    /// This trait impl accepts any `IntoIterator`, unlike the [`extend`](ArenaVec::extend)
+    /// This trait impl accepts any `IntoIterator`, unlike the [`extend_exact`](ArenaVec::extend_exact)
     /// method which requires `ExactSizeIterator` to pre-allocate capacity.
     fn extend<I>(&mut self, iter: I)
     where
@@ -479,7 +485,7 @@ mod tests {
         let mut arena = Arena::new();
         let s = {
             let mut v = ArenaVec::new(&mut arena);
-            v.extend(0u32..5);
+            v.extend_exact(0u32..5);
             v.finish()
         };
         assert_eq!(s, &[0, 1, 2, 3, 4]);
