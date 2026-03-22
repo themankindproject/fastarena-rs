@@ -75,9 +75,9 @@ impl<'arena> Transaction<'arena> {
     /// Uses `ManuallyDrop` to prevent `Drop` from ever running — rollback after
     /// commit is impossible.
     pub fn commit(self) -> TxnStatus {
-        let this = ManuallyDrop::new(self);
+        let mut this = ManuallyDrop::new(self);
         unsafe {
-            let arena_ptr: *mut Arena = this.arena as *const _ as *mut _;
+            let arena_ptr = core::ptr::addr_of_mut!(*this.arena);
             (*arena_ptr).txn_depth = (*arena_ptr).txn_depth.wrapping_sub(1);
         }
         TxnStatus::Committed
