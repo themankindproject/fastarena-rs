@@ -32,6 +32,6 @@ mod util;
 mod vec;
 
 pub use arena::ArenaStats;
-pub use arena::{Arena, Checkpoint, CACHE_LINE_SIZE};
+pub use arena::{Arena, Checkpoint};
 pub use util::{Transaction, TxnDiff, TxnStatus};
 pub use vec::{ArenaVec, TryReserveError};

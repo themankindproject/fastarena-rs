@@ -306,12 +306,6 @@ arena.rewind(cp);              // 2 and 3 gone; blocks retained for reuse
 | `stats` | `fn stats(&self) -> ArenaStats` | O(1) |
 | `block_count` | `fn block_count(&self) -> usize` | O(1) |
 
-#### Constants
-
-```rust
-pub const CACHE_LINE_SIZE: usize = 64;
-```
-
 ---
 
 ### Transaction

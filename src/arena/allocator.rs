@@ -17,7 +17,7 @@ const MAX_BLOCK_SIZE: usize = 16 * 1_024 * 1_024;
 const BLOCKS_INLINE_CAP: usize = 8;
 
 /// Cache-line size on x86-64 / ARM64 hardware.
-pub const CACHE_LINE_SIZE: usize = 64;
+pub(crate) const CACHE_LINE_SIZE: usize = 64;
 
 /// An opaque snapshot of arena state used by [`Arena::rewind`].
 ///

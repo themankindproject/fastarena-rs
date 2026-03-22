@@ -3,7 +3,7 @@
 //! Demonstrates `alloc`, `alloc_slice`, `alloc_slice_copy`, `alloc_str`,
 //! `alloc_uninit`, `alloc_raw`, `alloc_zeroed`, and `alloc_cache_aligned`.
 
-use fastarena::{Arena, CACHE_LINE_SIZE};
+use fastarena::Arena;
 
 fn main() {
     let mut arena = Arena::new();
@@ -49,8 +49,8 @@ fn main() {
     println!(
         "alloc_cache_aligned ptr = {:p} ({}-byte aligned: {})",
         buf,
-        CACHE_LINE_SIZE,
-        buf.as_ptr() as usize % CACHE_LINE_SIZE == 0
+        64,
+        buf.as_ptr() as usize % 64 == 0
     );
 
     // With custom initial capacity

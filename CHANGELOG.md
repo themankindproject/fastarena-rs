@@ -75,6 +75,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Documentation:** `CHANGELOG.md` transaction entries now clarify budget
   tracks `size_of::<T>()` only and `arena_mut` bypasses budget.
 
+### Removed
+
+- `CACHE_LINE_SIZE` from public API (`pub(crate)` now). Use the literal `64`
+  or `alloc_cache_aligned(size)` directly.
+- `run_with_transaction` / `run_with_transaction_infallible` from public API
+  (`pub(crate)` now). Use `Arena::with_transaction` /
+  `Arena::with_transaction_infallible` instead.
+
 ## [0.1.0] - 2026-03-23
 
 Initial release.

@@ -2,7 +2,8 @@ use core::mem::{self, ManuallyDrop};
 use core::ptr::NonNull;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use crate::arena::{Arena, Checkpoint, CACHE_LINE_SIZE};
+use crate::arena::allocator::CACHE_LINE_SIZE;
+use crate::arena::{Arena, Checkpoint};
 
 /// Outcome of [`Transaction::commit`] or [`Transaction::rollback`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -399,7 +400,7 @@ impl Drop for Transaction<'_> {
 /// });
 /// assert_eq!(result, Ok(1));
 /// ```
-pub fn run_with_transaction<'arena, F, T, E>(arena: &'arena mut Arena, f: F) -> Result<T, E>
+pub(crate) fn run_with_transaction<'arena, F, T, E>(arena: &'arena mut Arena, f: F) -> Result<T, E>
 where
     F: FnOnce(&mut Transaction<'arena>) -> Result<T, E>,
 {
@@ -431,7 +432,7 @@ where
 /// });
 /// assert_eq!(value, 30);
 /// ```
-pub fn run_with_transaction_infallible<'arena, F, T>(arena: &'arena mut Arena, f: F) -> T
+pub(crate) fn run_with_transaction_infallible<'arena, F, T>(arena: &'arena mut Arena, f: F) -> T
 where
     F: FnOnce(&mut Transaction<'arena>) -> T,
 {
