@@ -387,25 +387,46 @@ impl<'arena, T> IntoIterator for ArenaVec<'arena, T> {
     type Item = T;
     type IntoIter = ArenaVecIntoIter<'arena, T>;
     fn into_iter(self) -> Self::IntoIter {
-        ArenaVecIntoIter { inner: self }
+        ArenaVecIntoIter {
+            inner: self,
+            start: 0,
+        }
     }
 }
 
 pub struct ArenaVecIntoIter<'arena, T> {
     inner: ArenaVec<'arena, T>,
+    start: usize,
 }
 
 impl<'arena, T> Iterator for ArenaVecIntoIter<'arena, T> {
     type Item = T;
     fn next(&mut self) -> Option<T> {
-        self.inner.pop()
+        if self.start >= self.inner.len {
+            return None;
+        }
+        let val = unsafe { self.inner.ptr.as_ptr().add(self.start).read() };
+        self.start += 1;
+        Some(val)
     }
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.inner.len(), Some(self.inner.len()))
+        let remaining = self.inner.len - self.start;
+        (remaining, Some(remaining))
     }
 }
 
 impl<'arena, T> ExactSizeIterator for ArenaVecIntoIter<'arena, T> {}
+
+impl<T> Drop for ArenaVecIntoIter<'_, T> {
+    fn drop(&mut self) {
+        if core::mem::needs_drop::<T>() {
+            for i in self.start..self.inner.len {
+                unsafe { core::ptr::drop_in_place(self.inner.ptr.as_ptr().add(i)) }
+            }
+        }
+        self.inner.len = 0;
+    }
+}
 
 impl<'arena, T> IntoIterator for &'arena ArenaVec<'arena, T> {
     type Item = &'arena T;
@@ -547,5 +568,16 @@ mod tests {
         let mut v = ArenaVec::new(&mut arena);
         v.push(1u32);
         let _ = v[1];
+    }
+
+    #[test]
+    fn into_iter_yields_forward_order() {
+        let mut arena = Arena::new();
+        let mut v = ArenaVec::new(&mut arena);
+        v.push(1u32);
+        v.push(2);
+        v.push(3);
+        let collected: Vec<u32> = v.into_iter().collect();
+        assert_eq!(collected, &[1, 2, 3]);
     }
 }

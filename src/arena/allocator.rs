@@ -313,9 +313,10 @@ impl Arena {
     /// Capture the current allocation position as an opaque [`Checkpoint`].
     #[inline(always)]
     pub fn checkpoint(&self) -> Checkpoint {
+        let current_offset = self.cur_ptr as usize - self.blocks[self.current].base;
         Checkpoint {
             block_idx: self.current,
-            offset: self.blocks[self.current].offset,
+            offset: current_offset,
             bytes_allocated: self.bytes_allocated,
             #[cfg(feature = "drop-tracking")]
             drop_registry_len: self.drop_registry.len(),
@@ -529,12 +530,16 @@ impl Arena {
         let worst = size
             .checked_add(align - 1)
             .expect("allocation size overflow");
-        let sz = self
+
+        let rounded = self
             .next_block_size
             .max(worst)
-            .next_power_of_two()
-            .min(MAX_BLOCK_SIZE);
-        self.next_block_size = sz.saturating_add(sz / 2).min(MAX_BLOCK_SIZE);
-        sz
+            .checked_next_power_of_two()
+            .unwrap_or(usize::MAX)
+            .min(MAX_BLOCK_SIZE)
+            .max(worst);
+
+        self.next_block_size = rounded.saturating_add(rounded / 2).min(MAX_BLOCK_SIZE);
+        rounded
     }
 }

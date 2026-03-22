@@ -899,3 +899,14 @@ fn request_scoped_allocator_reset_cycle() {
 
     assert_eq!(succeeded, 16, "4 rounds failed (round%5==3: 3,8,13,18)");
 }
+
+#[test]
+fn checkpoint_after_some_allocs() {
+    let mut arena = Arena::new();
+    let x_ptr = arena.alloc(0xDEAD_BEEFu64) as *mut u64;
+    let cp = arena.checkpoint();
+    let _ = arena.alloc(0xCAFEu64);
+    arena.rewind(cp);
+    assert_eq!(unsafe { *x_ptr }, 0xDEAD_BEEF);
+    assert_eq!(arena.stats().bytes_allocated, 8);
+}
