@@ -97,6 +97,16 @@ pub struct Arena {
 
 impl Arena {
     /// Create an arena with a 64 KiB initial block.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let x = arena.alloc(42u64);
+    /// assert_eq!(*x, 42);
+    /// ```
     pub fn new() -> Self {
         Self::with_capacity(DEFAULT_BLOCK_SIZE)
     }
@@ -105,6 +115,16 @@ impl Arena {
     ///
     /// Choose a value close to expected peak usage to avoid early block
     /// chaining.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::with_capacity(1024 * 1024); // 1 MiB
+    /// let _ = arena.alloc(1u64);
+    /// assert_eq!(arena.stats().bytes_reserved, 1024 * 1024);
+    /// ```
     pub fn with_capacity(initial_bytes: usize) -> Self {
         let size = initial_bytes.max(MIN_BLOCK_SIZE);
         let block = Block::new(size);
@@ -155,6 +175,18 @@ impl Arena {
     /// Without `drop-tracking`, the destructor of `T` is never called.
     /// Arena memory is reclaimed in bulk by [`reset`](Arena::reset) or when
     /// the arena itself is dropped.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let x: &mut u64 = arena.alloc(42);
+    /// assert_eq!(*x, 42);
+    /// *x = 100;
+    /// assert_eq!(*x, 100);
+    /// ```
     #[inline]
     pub fn alloc<T>(&mut self, val: T) -> &mut T {
         if mem::size_of::<T>() == 0 {
@@ -171,6 +203,16 @@ impl Arena {
     }
 
     /// Allocate a contiguous slice of `T` from an `ExactSizeIterator`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let slice = arena.alloc_slice(0u32..5);
+    /// assert_eq!(slice, &[0, 1, 2, 3, 4]);
+    /// ```
     #[inline]
     pub fn alloc_slice<T, I>(&mut self, iter: I) -> &mut [T]
     where
@@ -197,6 +239,17 @@ impl Arena {
 
     /// Allocate a contiguous slice from a slice of `Copy` items using a single memcpy.
     /// Significantly faster than `alloc_slice` for small-to-medium `Copy` types.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let src: &[u64] = &[1, 2, 3, 4];
+    /// let dst = arena.alloc_slice_copy(src);
+    /// assert_eq!(dst, &[1, 2, 3, 4]);
+    /// ```
     #[inline]
     pub fn alloc_slice_copy<T: Copy>(&mut self, src: &[T]) -> &mut [T] {
         let len = src.len();
@@ -215,6 +268,16 @@ impl Arena {
     }
 
     /// Copy a string slice into the arena and return a reference to it.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let s: &str = arena.alloc_str("hello world");
+    /// assert_eq!(s, "hello world");
+    /// ```
     #[inline(always)]
     pub fn alloc_str(&mut self, s: &str) -> &str {
         if s.is_empty() {
@@ -255,6 +318,17 @@ impl Arena {
     /// # Panics
     ///
     /// Panics if `align` is not a power of two or the system is out of memory.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let ptr = arena.alloc_zeroed(32, 8);
+    /// let buf = unsafe { std::slice::from_raw_parts(ptr.as_ptr(), 32) };
+    /// assert!(buf.iter().all(|&b| b == 0));
+    /// ```
     #[inline]
     pub fn alloc_zeroed(&mut self, size: usize, align: usize) -> NonNull<u8> {
         if size == 0 {
@@ -273,6 +347,16 @@ impl Arena {
     /// # Panics
     ///
     /// Panics if the system is out of memory.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let ptr = arena.alloc_cache_aligned(128);
+    /// assert_eq!(ptr.as_ptr() as usize % 64, 0);
+    /// ```
     #[inline]
     pub fn alloc_cache_aligned(&mut self, size: usize) -> NonNull<u8> {
         self.alloc_raw(size, CACHE_LINE_SIZE)
@@ -282,6 +366,16 @@ impl Arena {
     ///
     /// # Panics
     /// Panics if `align` is not a power of two or the system is out of memory.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let ptr = arena.alloc_raw(64, 32);
+    /// assert_eq!(ptr.as_ptr() as usize % 32, 0);
+    /// ```
     #[inline]
     pub fn alloc_raw(&mut self, size: usize, align: usize) -> NonNull<u8> {
         assert!(align.is_power_of_two(), "align must be a power of two");
@@ -294,6 +388,16 @@ impl Arena {
 
 impl Arena {
     /// Fallible variant of [`alloc`](Arena::alloc). Returns `None` on OOM.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let x = arena.try_alloc(42u64);
+    /// assert_eq!(*x.unwrap(), 42);
+    /// ```
     #[inline]
     pub fn try_alloc<T>(&mut self, val: T) -> Option<&mut T> {
         if mem::size_of::<T>() == 0 {
@@ -310,6 +414,16 @@ impl Arena {
     }
 
     /// Fallible variant of [`alloc_slice`](Arena::alloc_slice).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let s = arena.try_alloc_slice(0u32..4);
+    /// assert_eq!(s.unwrap(), &[0, 1, 2, 3]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice<T, I>(&mut self, iter: I) -> Option<&mut [T]>
     where
@@ -335,6 +449,16 @@ impl Arena {
     }
 
     /// Fallible variant of [`alloc_str`](Arena::alloc_str).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let s = arena.try_alloc_str("hello");
+    /// assert_eq!(s, Some("hello"));
+    /// ```
     #[inline]
     pub fn try_alloc_str(&mut self, s: &str) -> Option<&str> {
         if s.is_empty() {
@@ -351,6 +475,17 @@ impl Arena {
     }
 
     /// Fallible variant of [`alloc_raw`](Arena::alloc_raw).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let ptr = arena.try_alloc_raw(128, 64);
+    /// assert!(ptr.is_some());
+    /// assert_eq!(ptr.unwrap().as_ptr() as usize % 64, 0);
+    /// ```
     #[inline]
     pub fn try_alloc_raw(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
         assert!(align.is_power_of_two(), "align must be a power of two");
@@ -361,6 +496,16 @@ impl Arena {
     }
 
     /// Fallible variant of [`alloc_slice_copy`](Arena::alloc_slice_copy).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let s = arena.try_alloc_slice_copy(&[10u64, 20, 30]);
+    /// assert_eq!(s.unwrap(), &[10, 20, 30]);
+    /// ```
     #[inline]
     pub fn try_alloc_slice_copy<T: Copy>(&mut self, src: &[T]) -> Option<&mut [T]> {
         let len = src.len();
@@ -379,6 +524,18 @@ impl Arena {
     }
 
     /// Fallible variant of [`alloc_zeroed`](Arena::alloc_zeroed).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let ptr = arena.try_alloc_zeroed(64, 8);
+    /// assert!(ptr.is_some());
+    /// let buf = unsafe { std::slice::from_raw_parts(ptr.unwrap().as_ptr(), 64) };
+    /// assert!(buf.iter().all(|&b| b == 0));
+    /// ```
     #[inline]
     pub fn try_alloc_zeroed(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
         assert!(align.is_power_of_two(), "align must be a power of two");
@@ -391,6 +548,17 @@ impl Arena {
     }
 
     /// Fallible variant of [`alloc_cache_aligned`](Arena::alloc_cache_aligned).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let ptr = arena.try_alloc_cache_aligned(128);
+    /// assert!(ptr.is_some());
+    /// assert_eq!(ptr.unwrap().as_ptr() as usize % 64, 0);
+    /// ```
     #[inline]
     pub fn try_alloc_cache_aligned(&mut self, size: usize) -> Option<NonNull<u8>> {
         self.try_alloc_raw(size, CACHE_LINE_SIZE)
@@ -399,6 +567,19 @@ impl Arena {
 
 impl Arena {
     /// Capture the current allocation position as an opaque [`Checkpoint`].
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let _ = arena.alloc(1u64);
+    /// let cp = arena.checkpoint();
+    /// let _ = arena.alloc(2u64);
+    /// arena.rewind(cp);
+    /// assert_eq!(arena.stats().bytes_allocated, 8);
+    /// ```
     #[inline(always)]
     pub fn checkpoint(&self) -> Checkpoint {
         let current_offset = self.cur_ptr as usize - self.cur_base;
@@ -420,6 +601,19 @@ impl Arena {
     ///
     /// # Panics
     /// Panics if `cp` was not produced by this arena.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let cp = arena.checkpoint();
+    /// let x = arena.alloc(0xDEADu64);
+    /// arena.rewind(cp);
+    /// // x is now dangling — memory reclaimed for reuse
+    /// assert_eq!(arena.stats().bytes_allocated, 0);
+    /// ```
     pub fn rewind(&mut self, cp: Checkpoint) {
         assert!(
             cp.block_idx < self.blocks.len(),
@@ -452,6 +646,17 @@ impl Arena {
     ///
     /// Complexity is O(peak_blocks) — only blocks that were actually used
     /// since the last reset are zeroed. Single-block arenas pay O(1).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// for _ in 0..100 { let _ = arena.alloc(0u64); }
+    /// arena.reset();
+    /// assert_eq!(arena.stats().bytes_allocated, 0);
+    /// ```
     pub fn reset(&mut self) {
         #[cfg(feature = "drop-tracking")]
         self.drop_registry.run_all_drops();
@@ -469,6 +674,19 @@ impl Arena {
     ///
     /// All allocations made through the guard are rolled back automatically
     /// when it is dropped, unless [`Transaction::commit`] is called first.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut txn = arena.transaction();
+    /// txn.alloc(1u32);
+    /// txn.alloc(2u32);
+    /// txn.commit();
+    /// assert!(arena.stats().bytes_allocated >= 8);
+    /// ```
     #[inline]
     pub fn transaction(&mut self) -> Transaction<'_> {
         Transaction::new(self)
@@ -477,6 +695,19 @@ impl Arena {
     /// Execute a closure inside a transaction.
     ///
     /// `Ok` commits; `Err` rolls back all allocations before returning.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let result = arena.with_transaction(|txn| -> Result<u32, &str> {
+    ///     let x = txn.alloc(21u32);
+    ///     Ok(*x * 2)
+    /// });
+    /// assert_eq!(result, Ok(42));
+    /// ```
     #[inline]
     pub fn with_transaction<F, T, E>(&mut self, f: F) -> Result<T, E>
     where
@@ -489,6 +720,18 @@ impl Arena {
     /// even if the closure panics. The panic is re-raised after the commit.
     ///
     /// If you want rollback-on-panic, use [`Arena::with_transaction`] instead.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// let val = arena.with_transaction_infallible(|txn| {
+    ///     *txn.alloc(7u32) * 6
+    /// });
+    /// assert_eq!(val, 42);
+    /// ```
     #[inline]
     pub fn with_transaction_infallible<F, T>(&mut self, f: F) -> T
     where
@@ -498,6 +741,21 @@ impl Arena {
     }
 
     /// Current number of open transactions and savepoints.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// assert_eq!(arena.transaction_depth(), 0);
+    /// {
+    ///     let mut txn = arena.transaction();
+    ///     assert_eq!(txn.depth(), 1);
+    ///     txn.commit();
+    /// }
+    /// assert_eq!(arena.transaction_depth(), 0);
+    /// ```
     #[inline]
     pub fn transaction_depth(&self) -> usize {
         self.txn_depth
@@ -527,6 +785,18 @@ impl Arena {
     pub unsafe fn register_drop<T>(&mut self, _ptr: *mut T) {}
 
     /// Return a point-in-time snapshot of memory usage. O(1).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::new();
+    /// for _ in 0..100 { let _ = arena.alloc(0u64); }
+    /// let stats = arena.stats();
+    /// assert!(stats.bytes_allocated >= 800);
+    /// println!("{:.1}% utilized", stats.utilization() * 100.0);
+    /// ```
     #[inline(always)]
     pub fn stats(&self) -> ArenaStats {
         let current_used = self.cur_ptr as usize - self.cur_base;
@@ -538,6 +808,16 @@ impl Arena {
     }
 
     /// Number of blocks currently owned by the arena.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::Arena;
+    ///
+    /// let mut arena = Arena::with_capacity(64);
+    /// for _ in 0..100 { let _ = arena.alloc(0u64); }
+    /// assert!(arena.block_count() > 1);
+    /// ```
     #[inline(always)]
     pub fn block_count(&self) -> usize {
         self.blocks.len()

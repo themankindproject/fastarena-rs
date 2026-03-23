@@ -70,6 +70,18 @@ pub struct ArenaVec<'arena, T> {
 
 impl<'arena, T> ArenaVec<'arena, T> {
     /// Create an empty `ArenaVec`. No allocation is made until the first push.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut v = ArenaVec::<u32>::new(&mut arena);
+    /// assert!(v.is_empty());
+    /// v.push(1);
+    /// assert_eq!(v.len(), 1);
+    /// ```
     pub fn new(arena: &'arena mut Arena) -> Self {
         ArenaVec {
             arena,
@@ -82,6 +94,18 @@ impl<'arena, T> ArenaVec<'arena, T> {
 
     /// Create an `ArenaVec` pre-allocated for `cap` elements, avoiding growth
     /// copies when the final size is known upfront.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut v = ArenaVec::<u64>::with_capacity(&mut arena, 32);
+    /// assert_eq!(v.capacity(), 32);
+    /// for i in 0..32 { v.push(i); }
+    /// assert_eq!(v.capacity(), 32); // no reallocation
+    /// ```
     pub fn with_capacity(arena: &'arena mut Arena, cap: usize) -> Self {
         let mut v = ArenaVec::new(arena);
         if cap > 0 && mem::size_of::<T>() > 0 {
@@ -93,6 +117,19 @@ impl<'arena, T> ArenaVec<'arena, T> {
     }
 
     /// Append `val`. Amortised O(1).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut v = ArenaVec::new(&mut arena);
+    /// v.push(10u32);
+    /// v.push(20);
+    /// assert_eq!(v[0], 10);
+    /// assert_eq!(v[1], 20);
+    /// ```
     #[inline]
     pub fn push(&mut self, val: T) {
         if self.len == self.cap {
@@ -105,6 +142,17 @@ impl<'arena, T> ArenaVec<'arena, T> {
     /// Try to append `val`, returning it back on OOM.
     ///
     /// Returns `Ok(())` on success, `Err(val)` if the arena is out of memory.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut v = ArenaVec::new(&mut arena);
+    /// assert!(v.try_push(42u32).is_ok());
+    /// assert_eq!(v[0], 42);
+    /// ```
     #[inline]
     pub fn try_push(&mut self, val: T) -> Result<(), T> {
         if self.len == self.cap && self.try_grow().is_err() {
@@ -116,6 +164,20 @@ impl<'arena, T> ArenaVec<'arena, T> {
     }
 
     /// Remove and return the last element, or `None` if empty.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut v = ArenaVec::new(&mut arena);
+    /// v.push(1u32);
+    /// v.push(2);
+    /// assert_eq!(v.pop(), Some(2));
+    /// assert_eq!(v.pop(), Some(1));
+    /// assert_eq!(v.pop(), None);
+    /// ```
     #[inline]
     pub fn pop(&mut self) -> Option<T> {
         if self.len == 0 {
@@ -128,6 +190,19 @@ impl<'arena, T> ArenaVec<'arena, T> {
     /// Remove all elements from the vector without freeing memory.
     ///
     /// Element destructors are run if `T: Drop`. Capacity is preserved.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut v = ArenaVec::new(&mut arena);
+    /// v.extend_exact([1u32, 2, 3]);
+    /// v.clear();
+    /// assert!(v.is_empty());
+    /// assert!(v.capacity() >= 3);
+    /// ```
     #[inline]
     pub fn clear(&mut self) {
         if mem::needs_drop::<T>() {
@@ -142,6 +217,17 @@ impl<'arena, T> ArenaVec<'arena, T> {
     ///
     /// Requires `ExactSizeIterator` to pre-compute capacity and avoid repeated
     /// reallocation during growth.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut v = ArenaVec::new(&mut arena);
+    /// v.extend_exact(0u32..5);
+    /// assert_eq!(v.as_slice(), &[0, 1, 2, 3, 4]);
+    /// ```
     #[inline]
     pub fn extend_exact<I>(&mut self, iter: I)
     where
@@ -212,12 +298,35 @@ impl<'arena, T> ArenaVec<'arena, T> {
     }
 
     /// Returns the number of elements in the vector.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut v = ArenaVec::new(&mut arena);
+    /// v.extend_exact([1u32, 2, 3]);
+    /// assert_eq!(v.len(), 3);
+    /// ```
     #[inline(always)]
     pub fn len(&self) -> usize {
         self.len
     }
 
     /// Returns `true` if the vector contains no elements.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut v = ArenaVec::<u32>::new(&mut arena);
+    /// assert!(v.is_empty());
+    /// v.push(1);
+    /// assert!(!v.is_empty());
+    /// ```
     #[inline(always)]
     pub fn is_empty(&self) -> bool {
         self.len == 0
@@ -228,6 +337,16 @@ impl<'arena, T> ArenaVec<'arena, T> {
     /// Capacity is the number of elements the vector can hold without
     /// reallocating. For ZSTs (zero-sized types), capacity is tracked
     /// independently of actual memory.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let v = ArenaVec::<u64>::with_capacity(&mut arena, 16);
+    /// assert_eq!(v.capacity(), 16);
+    /// ```
     #[inline]
     pub fn capacity(&self) -> usize {
         self.cap
@@ -270,6 +389,17 @@ impl<'arena, T> ArenaVec<'arena, T> {
     /// # Panics
     ///
     /// Panics if the new capacity overflows `usize`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut v = ArenaVec::<u32>::new(&mut arena);
+    /// v.reserve_exact(10);
+    /// assert!(v.capacity() >= 10);
+    /// ```
     pub fn reserve_exact(&mut self, additional: usize) {
         let required = self
             .len
@@ -284,6 +414,17 @@ impl<'arena, T> ArenaVec<'arena, T> {
     ///
     /// Returns an error instead of panicking when the capacity overflows or the
     /// arena is out of memory.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut v = ArenaVec::<u64>::new(&mut arena);
+    /// assert!(v.try_reserve_exact(64).is_ok());
+    /// assert!(v.capacity() >= 64);
+    /// ```
     pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), TryReserveError> {
         let required = self
             .len
@@ -347,6 +488,17 @@ impl<'arena, T> ArenaVec<'arena, T> {
     /// Returns a slice view of the vector's current contents.
     ///
     /// The slice length equals `self.len()` at the time of the call.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut v = ArenaVec::new(&mut arena);
+    /// v.extend_exact([10u32, 20, 30]);
+    /// assert_eq!(v.as_slice(), &[10, 20, 30]);
+    /// ```
     #[inline(always)]
     pub fn as_slice(&self) -> &[T] {
         unsafe { core::slice::from_raw_parts(self.ptr.as_ptr() as *const T, self.len) }
@@ -355,6 +507,18 @@ impl<'arena, T> ArenaVec<'arena, T> {
     /// Returns a mutable slice view of the vector's current contents.
     ///
     /// The slice length equals `self.len()` at the time of the call.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut v = ArenaVec::new(&mut arena);
+    /// v.extend_exact([1u32, 2, 3]);
+    /// for x in v.as_mut_slice() { *x *= 10; }
+    /// assert_eq!(v.as_slice(), &[10, 20, 30]);
+    /// ```
     #[inline(always)]
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         unsafe { core::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
@@ -363,6 +527,20 @@ impl<'arena, T> ArenaVec<'arena, T> {
     /// Consume the `ArenaVec`, returning a `&'arena mut [T]` backed by arena
     /// memory. The arena borrow is released; element destructors will **not**
     /// be called by `ArenaVec` after this point.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let slice: &mut [u32] = {
+    ///     let mut v = ArenaVec::new(&mut arena);
+    ///     v.extend_exact([1, 2, 3]);
+    ///     v.finish()
+    /// };
+    /// assert_eq!(slice, &[1, 2, 3]);
+    /// ```
     pub fn finish(self) -> &'arena mut [T] {
         let this = ManuallyDrop::new(self);
         unsafe { core::slice::from_raw_parts_mut(this.ptr.as_ptr(), this.len) }
