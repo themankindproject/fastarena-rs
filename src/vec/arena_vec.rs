@@ -19,6 +19,19 @@ impl From<core::alloc::LayoutError> for TryReserveError {
     }
 }
 
+impl std::fmt::Display for TryReserveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TryReserveError::CapacityOverflow => {
+                f.write_str("capacity overflow: requested size exceeds usize::MAX")
+            }
+            TryReserveError::AllocError => f.write_str("arena out of memory"),
+        }
+    }
+}
+
+impl std::error::Error for TryReserveError {}
+
 /// An append-only growable vector backed by arena memory.
 ///
 /// Elements 0..`capacity` are stored in a single arena allocation. Growth
@@ -424,6 +437,12 @@ impl<T> Drop for ArenaVec<'_, T> {
     }
 }
 
+impl<T: std::fmt::Debug> std::fmt::Debug for ArenaVec<'_, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.as_slice().iter()).finish()
+    }
+}
+
 impl<'arena, T> Extend<T> for ArenaVec<'arena, T> {
     /// Extends the vector by consuming items from the iterator one by one.
     ///
@@ -486,17 +505,17 @@ impl<T> Drop for ArenaVecIntoIter<'_, T> {
     }
 }
 
-impl<'arena, T> IntoIterator for &'arena ArenaVec<'arena, T> {
-    type Item = &'arena T;
-    type IntoIter = core::slice::Iter<'arena, T>;
+impl<'a, T> IntoIterator for &'a ArenaVec<'_, T> {
+    type Item = &'a T;
+    type IntoIter = core::slice::Iter<'a, T>;
     fn into_iter(self) -> Self::IntoIter {
         self.as_slice().iter()
     }
 }
 
-impl<'arena, T> IntoIterator for &'arena mut ArenaVec<'arena, T> {
-    type Item = &'arena mut T;
-    type IntoIter = core::slice::IterMut<'arena, T>;
+impl<'a, T> IntoIterator for &'a mut ArenaVec<'_, T> {
+    type Item = &'a mut T;
+    type IntoIter = core::slice::IterMut<'a, T>;
     fn into_iter(self) -> Self::IntoIter {
         self.as_mut_slice().iter_mut()
     }

@@ -17,12 +17,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `try_alloc_slice_copy` — fallible variant of `alloc_slice_copy` (`Copy` types via single `memcpy`)
 - `try_alloc_zeroed` — fallible variant of `alloc_zeroed` (zeroed raw bytes)
 - `try_alloc_cache_aligned` — fallible variant of `alloc_cache_aligned` (64-byte aligned)
+- `Debug` impl for `Arena` (shows stats, block_count, txn_depth)
+- `Debug` impl for `ArenaVec` (debug-list format, requires `T: Debug`)
+- `Display` and `std::error::Error` impls for `TryReserveError`
+- `ArenaVecIntoIter` re-exported from crate root
 
 ### Fixed
 
 - **Overflow safety:** `ArenaVec::extend_exact` and `ArenaVec::extend_from_slice` now use
   `checked_add` for the length computation (`self.len + add_len`) instead of raw addition,
   preventing silent `usize` wrap on overflow.
+- **Lifetime ergonomics:** `as_slice` and `as_mut_slice` on `ArenaVec` now return `&[T]`
+  / `&mut [T]` tied to the borrow lifetime instead of `&'arena [T]` / `&'arena mut [T]`.
+  `IntoIterator` for `&ArenaVec` / `&mut ArenaVec` now accepts any borrow lifetime
+  (`&'a ArenaVec<'arena, T>`) instead of requiring `&'arena ArenaVec<'arena, T>`.
 - **Soundness:** ZST allocation used `align as *mut T` to fabricate pointers, which
   is technically UB for alignments > 1. Replaced with `NonNull::dangling()` in
   `alloc`, `alloc_uninit`, `alloc_raw`, `alloc_zeroed`, `try_alloc`, and

@@ -137,6 +137,18 @@ impl Default for Arena {
     }
 }
 
+impl std::fmt::Debug for Arena {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let stats = self.stats();
+        f.debug_struct("Arena")
+            .field("bytes_allocated", &stats.bytes_allocated)
+            .field("bytes_reserved", &stats.bytes_reserved)
+            .field("block_count", &stats.block_count)
+            .field("txn_depth", &self.txn_depth)
+            .finish()
+    }
+}
+
 impl Arena {
     /// Allocate a value of type `T`, returning an exclusive reference.
     ///
