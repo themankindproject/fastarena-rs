@@ -183,16 +183,17 @@ See [USAGE.md](USAGE.md) for full examples.
 
 | Benchmark | fastarena | bumpalo | typed-arena |
 |-----------|-----------|---------|-------------|
-| alloc 1k items | **863 ns** | 897 ns | 988 ns |
-| alloc_slice n=64 | **12 ns** | 53 ns | 78 ns |
-| alloc_slice n=1024 | **63 ns** | 531 ns | — |
-| alloc_str (100x) | 199 ns | **176 ns** | — |
-| ArenaVec n=16 | **25 ns** | 39 ns | 27 ns |
-| ArenaVec n=256 | **231 ns** | 291 ns | 406 ns |
-| ArenaVec n=4096 | **3.4 µs** | 8.4 µs | 9.2 µs |
-| 10k allocs + reset | **14.1 µs** | 14.4 µs | 2.6 µs† |
-| reset (1 block) | 830 ns | **613 ns** | — |
-| 128 KB alloc | 57 ns | **25 ns** | — |
+| alloc 1k items | **894 ns** | 937 ns | 1072 ns |
+| alloc_slice n=64 | **10 ns** | 53 ns | 84 ns |
+| alloc_slice n=1024 | **64 ns** | 518 ns | — |
+| alloc_str (100x) | 202 ns | **190 ns** | — |
+| ArenaVec n=16 | **30 ns** | 42 ns | 34 ns |
+| ArenaVec n=256 | **263 ns** | 346 ns | 516 ns |
+| ArenaVec n=4096 | **3.4 µs** | 8.5 µs | 11.1 µs |
+| 10k allocs + reset | **15.0 µs** | 15.1 µs | 2.8 µs† |
+| reset (1 block) | **20 ns** | 696 ns | — |
+| reset (4 blocks) | **167 ns** | — | — |
+| 128 KB alloc | 63 ns | **27 ns** | — |
 
 † typed-arena drops and re-creates the arena each iteration; not directly comparable.
 
@@ -200,21 +201,22 @@ See [USAGE.md](USAGE.md) for full examples.
 
 | Benchmark | fastarena | Box/Vec | Speedup |
 |-----------|-----------|---------|---------|
-| alloc 1k u64 | **822 ns** | 15479 ns | **19x** |
-| alloc_slice n=512 | **55 ns** | 59 ns | ~1x |
-| alloc_slice n=4096 | **231 ns** | 215 ns | ~1x |
-| 10k allocs + reset | **13.4 µs** | 155.5 µs | **12x** |
-| `Arena::new` | **18 ns** | — | — |
-| `checkpoint()` | **87 ns** | — | — |
+| alloc 1k u64 | **864 ns** | 15732 ns | **18x** |
+| alloc_slice n=512 | **59 ns** | 65 ns | ~1x |
+| alloc_slice n=4096 | **246 ns** | 236 ns | ~1x |
+| 10k allocs + reset | **15.5 µs** | 211.8 µs | **14x** |
+| `Arena::new` | **22 ns** | — | — |
+| `checkpoint()` | **93 ns** | — | — |
 | `reset` 1 block | **20 ns** | — | — |
 | `commit` 16 allocs | **1.3 µs** | — | — |
 
 ### Why fastarena excels
 
-- **4-8x faster slice allocation** than bumpalo (batch write in tight loop)
-- **2.5x faster ArenaVec** than bumpalo/typed-arena for bulk collection building
+- **5-8x faster slice allocation** than bumpalo (batch write in tight loop)
+- **2-3x faster ArenaVec** than bumpalo/typed-arena for bulk collection building
 - **Tied on alloc** — on par with bumpalo for single-item allocation
-- **12x faster than Box** for bulk alloc + reclaim cycles
+- **14x faster than Box** for bulk alloc + reclaim cycles
+- **35x faster reset** than bumpalo for single-block arenas (O(peak) block reuse)
 - **Zero dependencies**: No external crates required
 
 ## Feature Flags

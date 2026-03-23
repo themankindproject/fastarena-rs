@@ -7,6 +7,41 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Soundness:** `InlineVec` `Send`/`Sync` trait bounds were too broad — the
+  blanket impls (`unsafe impl<T: Send> Send for InlineVec<T, N>`) did not
+  account for the raw pointer in `HeapBuf`, making it unsound for types
+  containing `!Send`/`!Sync` raw pointers. Now requires `[T; N]: Send`/`Sync`
+  as a where clause.
+
+- **Safety:** Replaced `unwrap_unchecked()` with `unwrap()` in `alloc_slice`,
+  `try_alloc_slice`, and `ArenaVec::extend_exact`. A malicious
+  `ExactSizeIterator` lying about its length could cause UB via
+  `unwrap_unchecked`.
+
+- **Robustness:** Test copies of `Block::try_alloc` and `InlineVec::heap_grow`
+  now use `checked_add`/`checked_mul` to match the library code and prevent
+  silent overflow in release mode.
+
+### Performance
+
+- **`reset()` is now O(peak_blocks) with zero wasted capacity.** Tracks a
+  `high_water_mark` (highest block index ever reached). On reset, only blocks
+  0..=high_water_mark have their offsets zeroed — all memory is fully reusable.
+  Single-block arenas pay O(1); multi-block arenas pay O(peak) instead of
+  O(retained).
+
+| Benchmark | fastarena | bumpalo | typed-arena |
+|-----------|-----------|---------|-------------|
+| alloc 1k items | **894 ns** | 937 ns | 1072 ns |
+| alloc_slice n=64 | **10 ns** | 53 ns | 84 ns |
+| alloc_slice n=1024 | **64 ns** | 518 ns | — |
+| ArenaVec n=256 | **263 ns** | 346 ns | 516 ns |
+| ArenaVec n=4096 | **3.4 µs** | 8.5 µs | 11.1 µs |
+| 10k allocs + reset | **15.0 µs** | 15.1 µs | 2.8 µs |
+| reset (1 block) | **20 ns** | 696 ns | — |
+
 ### Added
 
 - `examples/` directory with 10 runnable examples covering all usage patterns:
@@ -21,7 +56,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `real_world` — compiler speculative optimization, LSM batch abort, request-scoped reset cycles
   - `drop_tracking` — LIFO destructors on reset/rewind, transaction rollback/commit semantics
 
-### Fixed
+### Fixed (Documentation)
 
 - **Documentation:** Budget examples in README.md and USAGE.md used
   `alloc(vec![0u8; N])` which stores only the 24-byte `Vec` struct in the

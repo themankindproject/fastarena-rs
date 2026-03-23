@@ -31,7 +31,7 @@ impl Block {
     #[inline]
     pub(crate) fn try_alloc(&mut self, size: usize, align: usize) -> Option<(NonNull<u8>, usize)> {
         let aligned = align_up(self.base + self.offset, align);
-        let new_offset = (aligned - self.base) + size;
+        let new_offset = (aligned - self.base).checked_add(size)?;
         if new_offset > self.capacity {
             return None;
         }

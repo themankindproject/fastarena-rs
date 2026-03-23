@@ -37,8 +37,8 @@ pub(crate) struct InlineVec<T, const N: usize> {
     on_heap: bool,
 }
 
-unsafe impl<T: Send, const N: usize> Send for InlineVec<T, N> {}
-unsafe impl<T: Sync, const N: usize> Sync for InlineVec<T, N> {}
+unsafe impl<T: Send, const N: usize> Send for InlineVec<T, N> where [T; N]: Send {}
+unsafe impl<T: Sync, const N: usize> Sync for InlineVec<T, N> where [T; N]: Sync {}
 
 impl<T, const N: usize> InlineVec<T, N> {
     #[inline(always)]

@@ -278,7 +278,13 @@ match arena.try_alloc(42u64) {
 |--------|-----------|------------|-------------|
 | `checkpoint` | `fn checkpoint(&self) -> Checkpoint` | O(1) | Snapshot current position |
 | `rewind` | `fn rewind(&mut self, cp: Checkpoint)` | O(k) | Roll back to checkpoint |
-| `reset` | `fn reset(&mut self)` | O(b) | Reset entire arena |
+| `reset` | `fn reset(&mut self)` | O(p) | Reset entire arena |
+
+> **`reset()` complexity:** O(p) where p = peak block count since last reset.
+> A `high_water_mark` tracks the highest block index ever reached. On reset,
+> only blocks 0..=high_water_mark have their offsets zeroed — all their
+> capacity is fully reusable with no waste. Single-block arenas pay O(1).
+> No memory is freed — OS pages stay mapped and TLB-warm.
 
 ```rust
 let mut arena = Arena::new();
@@ -288,6 +294,9 @@ let cp = arena.checkpoint();   // O(1) — copies 3 integers
 arena.alloc(2u64);
 arena.alloc(3u64);
 arena.rewind(cp);              // 2 and 3 gone; blocks retained for reuse
+
+// reset() — reclaims all memory for reuse, O(peak_blocks)
+arena.reset();                 // fast, warm pages, no OS calls
 ```
 
 #### Transaction Methods
@@ -513,16 +522,16 @@ pub struct Checkpoint { /* opaque */ }
 
 | Benchmark | fastarena | bumpalo | typed-arena |
 |-----------|-----------|---------|-------------|
-| alloc 1k items | **863 ns** | 897 ns | 988 ns |
-| alloc_slice n=64 | **12 ns** | 53 ns | 78 ns |
-| alloc_slice n=1024 | **63 ns** | 531 ns | — |
-| alloc_str (100x) | 199 ns | **176 ns** | — |
-| ArenaVec n=16 | **25 ns** | 39 ns | 27 ns |
-| ArenaVec n=256 | **231 ns** | 291 ns | 406 ns |
-| ArenaVec n=4096 | **3.4 µs** | 8.4 µs | 9.2 µs |
-| 10k allocs + reset | **14.1 µs** | 14.4 µs | 2.6 µs† |
-| reset (1 block) | 830 ns | **613 ns** | — |
-| 128 KB alloc | 57 ns | **25 ns** | — |
+| alloc 1k items | **894 ns** | 937 ns | 1072 ns |
+| alloc_slice n=64 | **10 ns** | 53 ns | 84 ns |
+| alloc_slice n=1024 | **64 ns** | 518 ns | — |
+| alloc_str (100x) | 202 ns | **190 ns** | — |
+| ArenaVec n=16 | **30 ns** | 42 ns | 34 ns |
+| ArenaVec n=256 | **263 ns** | 346 ns | 516 ns |
+| ArenaVec n=4096 | **3.4 µs** | 8.5 µs | 11.1 µs |
+| 10k allocs + reset | **15.0 µs** | 15.1 µs | 2.8 µs† |
+| reset (1 block) | **20 ns** | 696 ns | — |
+| 128 KB alloc | 63 ns | **27 ns** | — |
 
 † typed-arena drops and re-creates the arena each iteration; not directly comparable.
 
@@ -530,21 +539,22 @@ pub struct Checkpoint { /* opaque */ }
 
 | Benchmark | fastarena | Box/Vec | Speedup |
 |-----------|-----------|---------|---------|
-| alloc 1k u64 | **822 ns** | 15479 ns | **19x** |
-| alloc_slice n=512 | **55 ns** | 59 ns | ~1x |
-| alloc_slice n=4096 | **231 ns** | 215 ns | ~1x |
-| 10k allocs + reset | **13.4 µs** | 155.5 µs | **12x** |
-| `Arena::new` | **18 ns** | — | — |
-| `checkpoint()` | **87 ns** | — | — |
+| alloc 1k u64 | **864 ns** | 15732 ns | **18x** |
+| alloc_slice n=512 | **59 ns** | 65 ns | ~1x |
+| alloc_slice n=4096 | **246 ns** | 236 ns | ~1x |
+| 10k allocs + reset | **15.5 µs** | 211.8 µs | **14x** |
+| `Arena::new` | **22 ns** | — | — |
+| `checkpoint()` | **93 ns** | — | — |
 | `reset` 1 block | **20 ns** | — | — |
 | `commit` 16 allocs | **1.3 µs** | — | — |
 
 ### Why fastarena excels
 
-- **4-8x faster slice allocation** than bumpalo (batch write in tight loop)
-- **2.5x faster ArenaVec** than bumpalo/typed-arena for bulk collection building
+- **5-8x faster slice allocation** than bumpalo (batch write in tight loop)
+- **2-3x faster ArenaVec** than bumpalo/typed-arena for bulk collection building
 - **Tied on alloc** — on par with bumpalo for single-item allocation
-- **12x faster than Box** for bulk alloc + reclaim cycles
+- **14x faster than Box** for bulk alloc + reclaim cycles
+- **35x faster reset** than bumpalo for single-block arenas (O(peak) block reuse)
 - **Zero dependencies**: No external crates required
 
 ### Complexity
@@ -555,7 +565,7 @@ pub struct Checkpoint { /* opaque */ }
 | `alloc` (new block) | O(1) amortized |
 | `checkpoint` | O(1) |
 | `rewind` | O(k) where k ≈ 0–1 |
-| `reset` | O(b) where b = blocks |
+| `reset` | O(p) where p = peak blocks since last reset |
 | `stats` | O(1) |
 
 ---
@@ -572,13 +582,17 @@ let arena = Arena::with_capacity(1024 * 1024);
 ### 2. Reset Over Recreate
 
 ```rust
-// Good: warm pages, no OS calls
+// Good: warm pages, no OS calls, O(peak_blocks) — all capacity reused
 let mut arena = Arena::new();
 for batch in batches {
     process(&mut arena, batch);
-    arena.reset();
+    arena.reset();  // zeros only blocks used since last reset
 }
 ```
+
+`reset()` tracks a `high_water_mark` internally — it only touches blocks
+that were actually used, leaving untouched blocks' offsets at zero.
+All memory is fully reusable with zero waste.
 
 ### 3. Use Transactions for Fallible Operations
 

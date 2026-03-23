@@ -133,7 +133,7 @@ impl<'arena, T> ArenaVec<'arena, T> {
             unsafe {
                 let dst = self.ptr.as_ptr().add(self.len);
                 for i in 0..add_len {
-                    dst.add(i).write(iter.next().unwrap_unchecked());
+                    dst.add(i).write(iter.next().unwrap());
                 }
             }
             self.len = new_len;

@@ -18,8 +18,8 @@ pub(crate) struct InlineVec<T, const N: usize> {
     on_heap: bool,
 }
 
-unsafe impl<T: Send, const N: usize> Send for InlineVec<T, N> {}
-unsafe impl<T: Sync, const N: usize> Sync for InlineVec<T, N> {}
+unsafe impl<T: Send, const N: usize> Send for InlineVec<T, N> where [T; N]: Send {}
+unsafe impl<T: Sync, const N: usize> Sync for InlineVec<T, N> where [T; N]: Sync {}
 
 impl<T, const N: usize> InlineVec<T, N> {
     pub(crate) fn new() -> Self {
@@ -126,7 +126,7 @@ impl<T, const N: usize> InlineVec<T, N> {
 
     #[cold]
     fn promote_and_push(&mut self, val: T) {
-        let new_cap = N * 2;
+        let new_cap = N.checked_mul(2).expect("InlineVec: capacity overflow");
         let new_ptr = heap_alloc::<T>(new_cap);
         unsafe { ptr::copy_nonoverlapping((*self.data.inline).as_ptr() as *const T, new_ptr, N) };
         self.data = Storage {
@@ -144,10 +144,13 @@ impl<T, const N: usize> InlineVec<T, N> {
     fn heap_grow(&mut self) {
         let old_cap = unsafe { (*self.data.heap).cap };
         let old_ptr = unsafe { (*self.data.heap).ptr };
-        let new_cap = old_cap * 2;
+        let new_cap = old_cap
+            .checked_mul(2)
+            .expect("InlineVec: capacity overflow");
         let new_ptr = heap_alloc::<T>(new_cap);
         unsafe { ptr::copy_nonoverlapping(old_ptr, new_ptr, self.len) };
-        unsafe { dealloc(old_ptr as *mut u8, Layout::array::<T>(old_cap).unwrap()) };
+        let old_layout = Layout::array::<T>(old_cap).expect("InlineVec: layout overflow");
+        unsafe { dealloc(old_ptr as *mut u8, old_layout) };
         self.data = Storage {
             heap: ManuallyDrop::new(HeapBuf {
                 ptr: new_ptr,

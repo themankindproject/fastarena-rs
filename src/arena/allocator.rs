@@ -82,6 +82,9 @@ pub struct Arena {
     pub(crate) cur_base: usize,
     pub(crate) cur_ptr: *mut u8,
     cur_end: *mut u8,
+    /// Highest block index ever reached — used by `reset()` to iterate only
+    /// the blocks that were actually touched, instead of all retained blocks.
+    high_water_mark: usize,
 }
 
 impl Arena {
@@ -115,6 +118,7 @@ impl Arena {
             cur_base: base,
             cur_ptr: base as *mut u8,
             cur_end: (base + capacity) as *mut u8,
+            high_water_mark: 0,
         }
     }
 }
@@ -163,7 +167,7 @@ impl Arena {
         unsafe {
             let start = ptr.as_ptr() as *mut T;
             for i in 0..len {
-                start.add(i).write(iter.next().unwrap_unchecked());
+                start.add(i).write(iter.next().unwrap());
             }
             #[cfg(feature = "drop-tracking")]
             self.drop_registry.register_slice(start, len);
@@ -302,7 +306,7 @@ impl Arena {
         Some(unsafe {
             let start = ptr.as_ptr() as *mut T;
             for i in 0..len {
-                start.add(i).write(iter.next().unwrap_unchecked());
+                start.add(i).write(iter.next().unwrap());
             }
             #[cfg(feature = "drop-tracking")]
             self.drop_registry.register_slice(start, len);
@@ -389,12 +393,16 @@ impl Arena {
     ///
     /// No memory is freed — OS pages stay mapped and TLB-warm. If
     /// `drop-tracking` is enabled, all registered destructors run first.
+    ///
+    /// Complexity is O(peak_blocks) — only blocks that were actually used
+    /// since the last reset are zeroed. Single-block arenas pay O(1).
     pub fn reset(&mut self) {
         #[cfg(feature = "drop-tracking")]
         self.drop_registry.run_all_drops();
-        for i in 0..=self.current {
+        for i in 0..=self.high_water_mark {
             self.blocks.get_mut(i).offset = 0;
         }
+        self.high_water_mark = 0;
         self.bytes_allocated = 0;
         self.set_current_block(0);
     }
@@ -555,6 +563,9 @@ impl Arena {
     fn set_current_block(&mut self, idx: usize) {
         let block = self.blocks.get(idx);
         self.current = idx;
+        if idx > self.high_water_mark {
+            self.high_water_mark = idx;
+        }
         self.cur_base = block.base;
         self.cur_ptr = (block.base + block.offset) as *mut u8;
         self.cur_end = (block.base + block.capacity) as *mut u8;
