@@ -261,8 +261,11 @@ All allocation methods have `try_*` variants returning `Option`:
 |--------|-----------|
 | `try_alloc` | `fn try_alloc<T>(&mut self, val: T) -> Option<&mut T>` |
 | `try_alloc_slice` | `fn try_alloc_slice<T, I>(&mut self, iter: I) -> Option<&mut [T]>` |
+| `try_alloc_slice_copy` | `fn try_alloc_slice_copy<T: Copy>(&mut self, src: &[T]) -> Option<&mut [T]>` |
 | `try_alloc_str` | `fn try_alloc_str(&mut self, s: &str) -> Option<&str>` |
 | `try_alloc_raw` | `fn try_alloc_raw(&mut self, size: usize, align: usize) -> Option<NonNull<u8>>` |
+| `try_alloc_zeroed` | `fn try_alloc_zeroed(&mut self, size: usize, align: usize) -> Option<NonNull<u8>>` |
+| `try_alloc_cache_aligned` | `fn try_alloc_cache_aligned(&mut self, size: usize) -> Option<NonNull<u8>>` |
 
 ```rust
 let mut arena = Arena::with_capacity(64);

@@ -77,6 +77,7 @@ impl Drop for Block {
     }
 }
 
+/// Round `addr` up to the next multiple of `align` (must be a power of two).
 #[inline(always)]
 pub(crate) fn align_up(addr: usize, align: usize) -> usize {
     (addr + align - 1) & !(align - 1)

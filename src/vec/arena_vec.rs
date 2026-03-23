@@ -404,6 +404,8 @@ impl<'arena, T> IntoIterator for ArenaVec<'arena, T> {
     }
 }
 
+/// Owning iterator over an [`ArenaVec`]. Drains elements front-to-back and
+/// drops any remaining elements (in LIFO order) when the iterator itself is dropped.
 pub struct ArenaVecIntoIter<'arena, T> {
     inner: ArenaVec<'arena, T>,
     start: usize,

@@ -12,10 +12,12 @@ const DROP_INLINE_CAP: usize = 32;
 /// A single drop entry — either a single element or a contiguous slice.
 #[cfg(feature = "drop-tracking")]
 enum DropSlot {
+    /// One element at `ptr` with its type-erased drop shim.
     Single {
         ptr: *mut u8,
         shim: unsafe fn(*mut u8),
     },
+    /// `count` contiguous elements at `ptr` with a type-erased slice-drop shim.
     Range {
         ptr: *mut u8,
         count: usize,
@@ -111,6 +113,7 @@ impl DropRegistry {
         }
     }
 
+    /// Run and remove all registered drops. Called by [`Arena::reset`].
     #[allow(dead_code)]
     #[inline]
     pub(crate) fn run_all_drops(&mut self) {
@@ -124,6 +127,7 @@ impl DropRegistry {
     }
 }
 
+/// Zero-sized stub when `drop-tracking` is disabled — every method is a no-op.
 #[cfg(not(feature = "drop-tracking"))]
 pub(crate) struct DropRegistry;
 

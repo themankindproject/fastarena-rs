@@ -11,9 +11,17 @@ use crate::util::{
 #[cfg(feature = "drop-tracking")]
 use crate::util::drop_registry::DropRegistry;
 
+/// Floor for block allocation — prevents degenerate tiny blocks.
 const MIN_BLOCK_SIZE: usize = 64;
+/// Default first-block size (64 KiB). Chosen to cover typical per-request
+/// arena usage without an early spill to a second block.
 const DEFAULT_BLOCK_SIZE: usize = 64 * 1_024;
+/// Hard ceiling for a single block (16 MiB). Blocks larger than this add
+/// pressure to the OS virtual-memory subsystem with no locality benefit.
 const MAX_BLOCK_SIZE: usize = 16 * 1_024 * 1_024;
+/// Number of block pointers stored inline before spilling to the heap.
+/// Most workloads stay within this limit, avoiding a heap alloc for the
+/// block list itself.
 const BLOCKS_INLINE_CAP: usize = 8;
 
 /// Cache-line size on x86-64 / ARM64 hardware.
@@ -138,7 +146,7 @@ impl Arena {
     #[inline]
     pub fn alloc<T>(&mut self, val: T) -> &mut T {
         if mem::size_of::<T>() == 0 {
-            return unsafe { &mut *(mem::align_of::<T>() as *mut T) };
+            return unsafe { &mut *NonNull::dangling().as_ptr() };
         }
         let ptr = self.alloc_raw_inner(mem::size_of::<T>(), mem::align_of::<T>());
         unsafe {
@@ -224,7 +232,7 @@ impl Arena {
         let size = mem::size_of::<T>();
         let align = mem::align_of::<T>();
         if size == 0 {
-            return unsafe { &mut *(align as *mut MaybeUninit<T>) };
+            return unsafe { &mut *NonNull::dangling().as_ptr() };
         }
         let ptr = self.alloc_raw_inner(size, align);
         unsafe { &mut *(ptr.as_ptr() as *mut MaybeUninit<T>) }
@@ -238,7 +246,7 @@ impl Arena {
     #[inline]
     pub fn alloc_zeroed(&mut self, size: usize, align: usize) -> NonNull<u8> {
         if size == 0 {
-            return unsafe { NonNull::new_unchecked(align as *mut u8) };
+            return NonNull::dangling();
         }
         let ptr = self.alloc_raw(size, align);
         unsafe { ptr.as_ptr().write_bytes(0, size) };
@@ -266,7 +274,7 @@ impl Arena {
     pub fn alloc_raw(&mut self, size: usize, align: usize) -> NonNull<u8> {
         assert!(align.is_power_of_two(), "align must be a power of two");
         if size == 0 {
-            return unsafe { NonNull::new_unchecked(align as *mut u8) };
+            return NonNull::dangling();
         }
         self.alloc_raw_inner(size, align)
     }
@@ -277,7 +285,7 @@ impl Arena {
     #[inline]
     pub fn try_alloc<T>(&mut self, val: T) -> Option<&mut T> {
         if mem::size_of::<T>() == 0 {
-            return Some(unsafe { &mut *(mem::align_of::<T>() as *mut T) });
+            return Some(unsafe { &mut *NonNull::dangling().as_ptr() });
         }
         let ptr = self.try_alloc_raw_inner(mem::size_of::<T>(), mem::align_of::<T>())?;
         Some(unsafe {
@@ -335,9 +343,45 @@ impl Arena {
     pub fn try_alloc_raw(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
         assert!(align.is_power_of_two(), "align must be a power of two");
         if size == 0 {
-            return Some(unsafe { NonNull::new_unchecked(align as *mut u8) });
+            return Some(NonNull::dangling());
         }
         self.try_alloc_raw_inner(size, align)
+    }
+
+    /// Fallible variant of [`alloc_slice_copy`](Arena::alloc_slice_copy).
+    #[inline]
+    pub fn try_alloc_slice_copy<T: Copy>(&mut self, src: &[T]) -> Option<&mut [T]> {
+        let len = src.len();
+        if len == 0 {
+            return Some(&mut []);
+        }
+        let total = mem::size_of::<T>().checked_mul(len)?;
+        let ptr = self.try_alloc_raw_inner(total, mem::align_of::<T>())?;
+        unsafe {
+            let dst = ptr.as_ptr() as *mut T;
+            std::ptr::copy_nonoverlapping(src.as_ptr(), dst, len);
+            #[cfg(feature = "drop-tracking")]
+            self.drop_registry.register_slice(dst, len);
+            Some(std::slice::from_raw_parts_mut(dst, len))
+        }
+    }
+
+    /// Fallible variant of [`alloc_zeroed`](Arena::alloc_zeroed).
+    #[inline]
+    pub fn try_alloc_zeroed(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
+        assert!(align.is_power_of_two(), "align must be a power of two");
+        if size == 0 {
+            return Some(NonNull::dangling());
+        }
+        let ptr = self.try_alloc_raw_inner(size, align)?;
+        unsafe { ptr.as_ptr().write_bytes(0, size) };
+        Some(ptr)
+    }
+
+    /// Fallible variant of [`alloc_cache_aligned`](Arena::alloc_cache_aligned).
+    #[inline]
+    pub fn try_alloc_cache_aligned(&mut self, size: usize) -> Option<NonNull<u8>> {
+        self.try_alloc_raw(size, CACHE_LINE_SIZE)
     }
 }
 
@@ -489,6 +533,7 @@ impl Arena {
 }
 
 impl Arena {
+    /// Fast-path allocation: tries the current block, falls back to `alloc_slow`.
     #[inline(always)]
     pub(crate) fn alloc_raw_inner(&mut self, size: usize, align: usize) -> NonNull<u8> {
         let aligned_ptr = align_up(self.cur_ptr as usize, align) as *mut u8;
@@ -500,6 +545,7 @@ impl Arena {
         self.alloc_slow(size, align)
     }
 
+    /// Fast-path fallible allocation: tries the current block, falls back to `alloc_slow_try`.
     #[inline(always)]
     pub(crate) fn try_alloc_raw_inner(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
         let aligned_ptr = align_up(self.cur_ptr as usize, align) as *mut u8;
@@ -511,6 +557,7 @@ impl Arena {
         self.alloc_slow_try(size, align)
     }
 
+    /// Slow path: scans retained blocks for space, then allocates a new one.
     #[cold]
     fn alloc_slow(&mut self, size: usize, align: usize) -> NonNull<u8> {
         self.bytes_allocated += self.cur_ptr as usize - self.cur_base;
@@ -536,6 +583,7 @@ impl Arena {
         ptr
     }
 
+    /// Slow path (fallible): scans retained blocks for space, then tries to allocate a new one.
     #[cold]
     fn alloc_slow_try(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
         self.bytes_allocated += self.cur_ptr as usize - self.cur_base;
@@ -559,6 +607,7 @@ impl Arena {
         Some(ptr)
     }
 
+    /// Sets `idx` as the active block and updates cached pointers.
     #[inline(always)]
     fn set_current_block(&mut self, idx: usize) {
         let block = self.blocks.get(idx);
@@ -571,6 +620,7 @@ impl Arena {
         self.cur_end = (block.base + block.capacity) as *mut u8;
     }
 
+    /// Computes the size of the next block, growing 1.5× up to `MAX_BLOCK_SIZE`.
     fn next_block_for(&mut self, size: usize, align: usize) -> usize {
         let worst = size
             .checked_add(align - 1)

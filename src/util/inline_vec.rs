@@ -53,11 +53,13 @@ impl<T, const N: usize> InlineVec<T, N> {
         }
     }
 
+    /// Returns the number of elements.
     #[inline(always)]
     pub(crate) fn len(&self) -> usize {
         self.len
     }
 
+    /// Appends an element. Stays inline if capacity allows; spills to heap on overflow.
     #[inline(always)]
     pub(crate) fn push(&mut self, val: T) {
         if !self.on_heap && self.len < N {
@@ -81,6 +83,7 @@ impl<T, const N: usize> InlineVec<T, N> {
         }
     }
 
+    /// Removes and returns the last element, or `None` if empty.
     #[allow(dead_code)]
     #[inline]
     pub(crate) fn pop(&mut self) -> Option<T> {
@@ -95,6 +98,7 @@ impl<T, const N: usize> InlineVec<T, N> {
         })
     }
 
+    /// Returns a shared reference to the element at index `i`.
     #[inline(always)]
     pub(crate) fn get(&self, i: usize) -> &T {
         debug_assert!(i < self.len);
@@ -105,6 +109,7 @@ impl<T, const N: usize> InlineVec<T, N> {
         }
     }
 
+    /// Returns a mutable reference to the element at index `i`.
     #[inline(always)]
     pub(crate) fn get_mut(&mut self, i: usize) -> &mut T {
         debug_assert!(i < self.len);
@@ -115,6 +120,7 @@ impl<T, const N: usize> InlineVec<T, N> {
         }
     }
 
+    /// Returns a shared slice view of all elements.
     #[inline(always)]
     pub(crate) fn as_slice(&self) -> &[T] {
         if !self.on_heap {
@@ -126,6 +132,7 @@ impl<T, const N: usize> InlineVec<T, N> {
         }
     }
 
+    /// Returns a mutable slice view of all elements.
     #[inline(always)]
     pub(crate) fn as_mut_slice(&mut self) -> &mut [T] {
         if !self.on_heap {
@@ -137,15 +144,18 @@ impl<T, const N: usize> InlineVec<T, N> {
         }
     }
 
+    /// Returns a forward iterator over elements.
     #[inline]
     pub(crate) fn iter(&self) -> std::slice::Iter<'_, T> {
         self.as_slice().iter()
     }
+    /// Returns a mutable forward iterator over elements.
     #[inline]
     pub(crate) fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
         self.as_mut_slice().iter_mut()
     }
 
+    /// Moves inline storage to a heap buffer and appends `val`.
     #[cold]
     fn promote_and_push(&mut self, val: T) {
         let new_cap = N.checked_mul(2).expect("InlineVec: capacity overflow");
@@ -162,6 +172,7 @@ impl<T, const N: usize> InlineVec<T, N> {
         self.len += 1;
     }
 
+    /// Doubles the heap buffer capacity.
     #[cold]
     fn heap_grow(&mut self) {
         let old_cap = unsafe { (*self.data.heap).cap };

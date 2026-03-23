@@ -5,6 +5,21 @@ All notable changes to `fastarena` will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `try_alloc_slice_copy` — fallible variant of `alloc_slice_copy` (`Copy` types via single `memcpy`)
+- `try_alloc_zeroed` — fallible variant of `alloc_zeroed` (zeroed raw bytes)
+- `try_alloc_cache_aligned` — fallible variant of `alloc_cache_aligned` (64-byte aligned)
+
+### Fixed
+
+- **Soundness:** ZST allocation used `align as *mut T` to fabricate pointers, which
+  is technically UB for alignments > 1. Replaced with `NonNull::dangling()` in
+  `alloc`, `alloc_uninit`, `alloc_raw`, `alloc_zeroed`, `try_alloc`, and
+  `try_alloc_raw`.
+
 ## [0.1.1] - 2026-03-23
 
 ### Fixed
