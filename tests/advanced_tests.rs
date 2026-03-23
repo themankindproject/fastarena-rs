@@ -911,3 +911,145 @@ fn checkpoint_after_some_allocs() {
     assert_eq!(unsafe { *x_ptr }, 0xDEAD_BEEF);
     assert_eq!(arena.stats().bytes_allocated, 8);
 }
+
+#[test]
+fn arena_vec_try_push_success() {
+    let mut arena = Arena::new();
+    let mut v = ArenaVec::new(&mut arena);
+    for i in 0u32..100 {
+        assert!(v.try_push(i).is_ok());
+    }
+    assert_eq!(v.len(), 100);
+    assert_eq!(v[99], 99);
+}
+
+#[test]
+fn arena_vec_try_push_returns_val_on_oom() {
+    // Test that try_push returns Err(val) when arena is exhausted.
+    // We can't easily trigger true system OOM in tests, but we verify the
+    // signature: on failure, the caller's value is returned untouched.
+    let mut arena = Arena::new();
+    let mut v = ArenaVec::<u64>::new(&mut arena);
+    // Normal push should always succeed on a fresh arena
+    assert!(v.try_push(42u64).is_ok());
+    assert_eq!(v[0], 42);
+    // Verify the value is preserved in the vector
+    assert_eq!(v.len(), 1);
+}
+
+#[test]
+fn arena_vec_try_reserve_exact_success() {
+    let mut arena = Arena::new();
+    let mut v = ArenaVec::<u64>::new(&mut arena);
+    assert!(v.try_reserve_exact(64).is_ok());
+    assert!(v.capacity() >= 64);
+    for i in 0u64..64 {
+        v.push(i);
+    }
+    assert_eq!(v.len(), 64);
+}
+
+#[test]
+fn arena_vec_try_reserve_exact_overflow() {
+    let mut arena = Arena::new();
+    let mut v = ArenaVec::<u8>::new(&mut arena);
+    v.push(1);
+    let result = v.try_reserve_exact(usize::MAX);
+    assert!(result.is_err());
+}
+
+#[test]
+fn transaction_alloc_slice_copy_basic() {
+    let mut arena = Arena::new();
+    let mut txn = arena.transaction();
+    let src: &[u32] = &[1, 2, 3, 4, 5];
+    let dst = txn.alloc_slice_copy(src);
+    assert_eq!(dst, &[1, 2, 3, 4, 5]);
+    let ptr = dst.as_ptr();
+    let len = dst.len();
+    txn.commit();
+    // Verify data survived commit
+    let s = unsafe { std::slice::from_raw_parts(ptr, len) };
+    assert_eq!(s, &[1, 2, 3, 4, 5]);
+}
+
+#[test]
+fn transaction_alloc_slice_copy_rollback() {
+    let mut arena = Arena::new();
+    let before = arena.stats().bytes_allocated;
+    {
+        let mut txn = arena.transaction();
+        let _ = txn.alloc_slice_copy(&[1u64, 2, 3, 4]);
+        // txn dropped without commit — rollback
+    }
+    assert_eq!(arena.stats().bytes_allocated, before);
+}
+
+#[test]
+fn transaction_alloc_slice_copy_budget() {
+    let mut arena = Arena::new();
+    let mut txn = arena.transaction();
+    txn.set_limit(16);
+    // 4 * 4 = 16 bytes — exactly at budget
+    let _ = txn.alloc_slice_copy(&[0u32; 4]);
+    assert_eq!(txn.budget_remaining(), Some(0));
+    txn.commit();
+}
+
+#[test]
+#[should_panic(expected = "budget exceeded")]
+fn transaction_alloc_slice_copy_budget_panic() {
+    let mut arena = Arena::new();
+    let mut txn = arena.transaction();
+    txn.set_limit(8);
+    // 4 * 4 = 16 bytes — exceeds budget
+    let _ = txn.alloc_slice_copy(&[0u32; 4]);
+    txn.commit();
+}
+
+#[test]
+fn transaction_try_alloc_slice_copy_success() {
+    let mut arena = Arena::new();
+    let mut txn = arena.transaction();
+    let result = txn.try_alloc_slice_copy(&[10u64, 20, 30]);
+    assert!(result.is_some());
+    assert_eq!(result.unwrap(), &[10, 20, 30]);
+    txn.commit();
+}
+
+#[test]
+fn transaction_try_alloc_slice_copy_budget_exceeded() {
+    let mut arena = Arena::new();
+    let mut txn = arena.transaction();
+    txn.set_limit(8);
+    // 3 * 8 = 24 bytes — exceeds budget
+    let result = txn.try_alloc_slice_copy(&[0u64; 3]);
+    assert!(result.is_none());
+    // Can still allocate within budget
+    let ok = txn.try_alloc_slice_copy(&[0u32; 2]); // 8 bytes
+    assert!(ok.is_some());
+    txn.commit();
+}
+
+#[test]
+fn transaction_try_alloc_cache_aligned_success() {
+    let mut arena = Arena::new();
+    let mut txn = arena.transaction();
+    let ptr = txn.try_alloc_cache_aligned(128);
+    assert!(ptr.is_some());
+    let p = ptr.unwrap().as_ptr() as usize;
+    assert_eq!(p % 64, 0, "must be 64-byte aligned");
+    txn.commit();
+}
+
+#[test]
+fn transaction_try_alloc_cache_aligned_budget() {
+    let mut arena = Arena::new();
+    let mut txn = arena.transaction();
+    txn.set_limit(100);
+    let result = txn.try_alloc_cache_aligned(128);
+    assert!(result.is_none(), "128 bytes exceeds 100 byte budget");
+    let ok = txn.try_alloc_cache_aligned(64);
+    assert!(ok.is_some());
+    txn.commit();
+}

@@ -89,6 +89,19 @@ impl<'arena, T> ArenaVec<'arena, T> {
         self.len += 1;
     }
 
+    /// Try to append `val`, returning it back on OOM.
+    ///
+    /// Returns `Ok(())` on success, `Err(val)` if the arena is out of memory.
+    #[inline]
+    pub fn try_push(&mut self, val: T) -> Result<(), T> {
+        if self.len == self.cap && self.try_grow().is_err() {
+            return Err(val);
+        }
+        unsafe { self.ptr.as_ptr().add(self.len).write(val) };
+        self.len += 1;
+        Ok(())
+    }
+
     /// Remove and return the last element, or `None` if empty.
     #[inline]
     pub fn pop(&mut self) -> Option<T> {
@@ -125,7 +138,10 @@ impl<'arena, T> ArenaVec<'arena, T> {
         let mut iter = iter.into_iter();
         let add_len = iter.len();
         if add_len > 0 {
-            let new_len = self.len + add_len;
+            let new_len = self
+                .len
+                .checked_add(add_len)
+                .expect("ArenaVec: capacity overflow");
             let size = mem::size_of::<T>();
             if size > 0 && new_len > self.cap {
                 self.grow_to(new_len);
@@ -168,7 +184,10 @@ impl<'arena, T> ArenaVec<'arena, T> {
         if add_len == 0 {
             return;
         }
-        let new_len = self.len + add_len;
+        let new_len = self
+            .len
+            .checked_add(add_len)
+            .expect("ArenaVec: capacity overflow");
         if mem::size_of::<T>() > 0 && new_len > self.cap {
             self.grow_to(new_len);
         }
@@ -246,6 +265,21 @@ impl<'arena, T> ArenaVec<'arena, T> {
         if required > self.cap {
             self.grow_to(required);
         }
+    }
+
+    /// Attempts to reserve exactly `additional` additional elements of capacity.
+    ///
+    /// Returns an error instead of panicking when the capacity overflows or the
+    /// arena is out of memory.
+    pub fn try_reserve_exact(&mut self, additional: usize) -> Result<(), TryReserveError> {
+        let required = self
+            .len
+            .checked_add(additional)
+            .ok_or(TryReserveError::CapacityOverflow)?;
+        if required > self.cap {
+            self.try_grow_to(required)?;
+        }
+        Ok(())
     }
 
     /// Attempts to reserve capacity for at least `additional` more elements.
@@ -332,6 +366,18 @@ impl<'arena, T> ArenaVec<'arena, T> {
                 .expect("ArenaVec: capacity overflow")
         };
         self.grow_to(new_cap);
+    }
+
+    #[cold]
+    fn try_grow(&mut self) -> Result<(), TryReserveError> {
+        let new_cap = if self.cap == 0 {
+            4
+        } else {
+            self.cap
+                .checked_mul(2)
+                .ok_or(TryReserveError::CapacityOverflow)?
+        };
+        self.try_grow_to(new_cap)
     }
 
     #[cold]

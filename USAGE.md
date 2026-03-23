@@ -353,7 +353,7 @@ A scoped RAII guard over an `Arena`. Auto-rolls back on drop unless committed.
 
 #### Allocation
 
-Transaction exposes all the same allocation methods as Arena (`alloc`, `alloc_slice`, `alloc_str`, `alloc_raw`, `try_alloc`, etc.) — all budget-checked.
+Transaction exposes all the same allocation methods as Arena (`alloc`, `alloc_slice`, `alloc_slice_copy`, `alloc_str`, `alloc_raw`, `try_alloc`, `try_alloc_slice_copy`, `try_alloc_cache_aligned`, etc.) — all budget-checked.
 
 #### Usage Patterns
 
@@ -420,6 +420,7 @@ An append-only growable vector backed by arena memory.
 | Method | Signature | Description |
 |--------|-----------|-------------|
 | `push` | `fn push(&mut self, val: T)` | Amortized O(1) append |
+| `try_push` | `fn try_push(&mut self, val: T) -> Result<(), T>` | Fallible push; returns value on OOM |
 | `pop` | `fn pop(&mut self) -> Option<T>` | Remove last element |
 | `clear` | `fn clear(&mut self)` | Clear, keep capacity |
 | `extend_exact` | `fn extend_exact<I>(&mut self, iter: I)` | Batch from `ExactSizeIterator` |
@@ -433,6 +434,7 @@ An append-only growable vector backed by arena memory.
 | `reserve` | `fn reserve(&mut self, additional: usize)` | Reserve (may over-allocate) |
 | `reserve_exact` | `fn reserve_exact(&mut self, additional: usize)` | Reserve exactly |
 | `try_reserve` | `fn try_reserve(&mut self, additional: usize) -> Result<(), TryReserveError>` | Fallible |
+| `try_reserve_exact` | `fn try_reserve_exact(&mut self, additional: usize) -> Result<(), TryReserveError>` | Fallible exact reserve |
 | `capacity` | `fn capacity(&self) -> usize` | Total slots |
 
 #### Introspection

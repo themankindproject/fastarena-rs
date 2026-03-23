@@ -9,12 +9,20 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `ArenaVec::try_push` — fallible push that returns `Err(val)` on OOM instead of panicking
+- `ArenaVec::try_reserve_exact` — fallible variant of `reserve_exact`
+- `Transaction::alloc_slice_copy` — budget-checked `memcpy` for `Copy` slices (previously only available on `Arena`)
+- `Transaction::try_alloc_slice_copy` — fallible variant of `alloc_slice_copy` on `Transaction`
+- `Transaction::try_alloc_cache_aligned` — fallible variant of `alloc_cache_aligned` on `Transaction`
 - `try_alloc_slice_copy` — fallible variant of `alloc_slice_copy` (`Copy` types via single `memcpy`)
 - `try_alloc_zeroed` — fallible variant of `alloc_zeroed` (zeroed raw bytes)
 - `try_alloc_cache_aligned` — fallible variant of `alloc_cache_aligned` (64-byte aligned)
 
 ### Fixed
 
+- **Overflow safety:** `ArenaVec::extend_exact` and `ArenaVec::extend_from_slice` now use
+  `checked_add` for the length computation (`self.len + add_len`) instead of raw addition,
+  preventing silent `usize` wrap on overflow.
 - **Soundness:** ZST allocation used `align as *mut T` to fabricate pointers, which
   is technically UB for alignments > 1. Replaced with `NonNull::dangling()` in
   `alloc`, `alloc_uninit`, `alloc_raw`, `alloc_zeroed`, `try_alloc`, and

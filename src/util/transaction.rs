@@ -318,6 +318,18 @@ impl<'arena> Transaction<'arena> {
         self.arena.alloc_raw(size, align)
     }
 
+    /// Copy a slice of `Copy` items into the arena using a single `memcpy`.
+    ///
+    /// See [`Arena::alloc_slice_copy`] for details.
+    #[inline]
+    pub fn alloc_slice_copy<T: Copy>(&mut self, src: &[T]) -> &mut [T] {
+        let total = mem::size_of::<T>().saturating_mul(src.len());
+        if !self.budget_ok(total) {
+            self.budget_panic(total);
+        }
+        self.arena.alloc_slice_copy(src)
+    }
+
     /// Fallible allocation of a value of type `T`. Returns `None` on OOM.
     ///
     /// See [`Arena::try_alloc`] for details.
@@ -366,6 +378,29 @@ impl<'arena> Transaction<'arena> {
             return None;
         }
         self.arena.try_alloc_raw(size, align)
+    }
+
+    /// Fallible copy of a `Copy` slice into the arena. Returns `None` on OOM.
+    ///
+    /// See [`Arena::alloc_slice_copy`] for details.
+    #[inline]
+    pub fn try_alloc_slice_copy<T: Copy>(&mut self, src: &[T]) -> Option<&mut [T]> {
+        let total = mem::size_of::<T>().saturating_mul(src.len());
+        if !self.budget_ok(total) {
+            return None;
+        }
+        self.arena.try_alloc_slice_copy(src)
+    }
+
+    /// Fallible cache-line-aligned allocation. Returns `None` on OOM.
+    ///
+    /// See [`Arena::alloc_cache_aligned`] for details.
+    #[inline]
+    pub fn try_alloc_cache_aligned(&mut self, size: usize) -> Option<NonNull<u8>> {
+        if !self.budget_ok(size) {
+            return None;
+        }
+        self.arena.try_alloc_raw(size, CACHE_LINE_SIZE)
     }
 }
 
