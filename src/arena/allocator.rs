@@ -865,7 +865,7 @@ impl Arena {
         }
         let cur_offset = self.cur_ptr as usize - self.cur_base as usize;
         let aligned_offset = align_up(cur_offset, align);
-        let new_offset = aligned_offset.checked_add(size).unwrap_or(usize::MAX);
+        let new_offset = aligned_offset.saturating_add(size);
         if new_offset <= self.blocks[self.current].capacity {
             let ptr = unsafe { self.cur_base.add(aligned_offset) };
             self.cur_ptr = unsafe { self.cur_base.add(new_offset) };

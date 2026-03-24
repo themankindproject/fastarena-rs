@@ -21,6 +21,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Debug` impl for `ArenaVec` (debug-list format, requires `T: Debug`)
 - `Display` and `std::error::Error` impls for `TryReserveError`
 - `ArenaVecIntoIter` re-exported from crate root
+- Miri CI job in GitHub Actions (runs on nightly, skips slow/large tests)
 
 ### Fixed
 
@@ -35,6 +36,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is technically UB for alignments > 1. Replaced with `NonNull::dangling()` in
   `alloc`, `alloc_uninit`, `alloc_raw`, `alloc_zeroed`, `try_alloc`, and
   `try_alloc_raw`.
+- **Miri compatibility:** Changed `Block::base` and `Arena::cur_base` from `usize` to
+  `*mut u8` for strict provenance compliance. Added zero-sized allocation checks
+  in `InlineVec` to fix Miri UB. Block alignment is now tracked, bypassing the fast
+  path for high-alignment requests (>64 bytes).
 
 ## [0.1.1] - 2026-03-23
 
