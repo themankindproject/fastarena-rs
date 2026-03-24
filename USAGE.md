@@ -54,14 +54,14 @@
 
 ```toml
 [dependencies]
-fastarena = "0.1.1"
+fastarena = "0.1.2"
 ```
 
 With destructor tracking:
 
 ```toml
 [dependencies]
-fastarena = { version = "0.1.1", features = ["drop-tracking"] }
+fastarena = { version = "0.1.2", features = ["drop-tracking"] }
 ```
 
 ---
@@ -193,7 +193,7 @@ By default, fastarena never runs destructors (zero overhead). Enable `drop-track
 
 ```toml
 [dependencies]
-fastarena = { version = "0.1.1", features = ["drop-tracking"] }
+fastarena = { version = "0.1.2", features = ["drop-tracking"] }
 ```
 
 ```rust
@@ -638,10 +638,10 @@ txn.commit();
 
 ```toml
 # Default (zero-cost, no destructor calls)
-fastarena = "0.1.1"
+fastarena = "0.1.2"
 
 # With drop-tracking
-fastarena = { version = "0.1.1", features = ["drop-tracking"] }
+fastarena = { version = "0.1.2", features = ["drop-tracking"] }
 ```
 
 ---

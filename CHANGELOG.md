@@ -5,7 +5,7 @@ All notable changes to `fastarena` will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.2] - 2026-03-24
 
 ### Added
 
@@ -258,6 +258,6 @@ Initial release.
 - USAGE.md with full API reference and best practices
 - Inline `///` docs on all public items
 
-
+[0.1.2]: https://github.com/themankindproject/fastarena-rs/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/themankindproject/fastarena-rs/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/themankindproject/fastarena-rs/releases/tag/v0.1.0
