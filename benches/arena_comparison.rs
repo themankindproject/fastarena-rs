@@ -1,113 +1,153 @@
 use bumpalo::Bump;
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use fastarena::{Arena, ArenaVec};
 use std::hint::black_box;
-use std::time::Instant;
 
-fn measure(label: &str, iters: u64, mut f: impl FnMut()) {
-    let start = Instant::now();
-    for _ in 0..iters {
-        f();
-    }
-    let ns = start.elapsed().as_nanos() as f64 / iters as f64;
-    println!("  {label:<40} {ns:>8.1} ns/iter");
+fn bench_alloc_comparison(c: &mut Criterion) {
+    let mut g = c.benchmark_group("alloc 1k items");
+    g.throughput(Throughput::Elements(1000));
+
+    g.bench_function("fastarena", |b| {
+        b.iter(|| {
+            let mut a = Arena::with_capacity(1000 * 16);
+            for i in 0u64..1000 {
+                black_box(a.alloc(black_box(i)));
+            }
+        });
+    });
+
+    g.bench_function("bumpalo", |b| {
+        b.iter(|| {
+            let a = Bump::with_capacity(1000 * 16);
+            for i in 0u64..1000 {
+                black_box(a.alloc(black_box(i)));
+            }
+        });
+    });
+
+    g.bench_function("typed-arena", |b| {
+        b.iter(|| {
+            let a = typed_arena::Arena::new();
+            for i in 0u64..1000 {
+                black_box(a.alloc(black_box(i)));
+            }
+        });
+    });
+
+    g.finish();
 }
 
-fn main() {
-    const N: u64 = 100_000;
+fn bench_alloc_slice_comparison(c: &mut Criterion) {
+    let mut g = c.benchmark_group("alloc_slice");
 
-    println!("\n=== alloc<T> (1k allocs) ===");
-    measure("fastarena", N, || {
-        let mut a = Arena::with_capacity(1_000 * 16);
-        for i in 0u64..1000 {
-            black_box(a.alloc(black_box(i)));
-        }
-    });
-    measure("bumpalo", N, || {
-        let a = Bump::with_capacity(1_000 * 16);
-        for i in 0u64..1000 {
-            black_box(a.alloc(black_box(i)));
-        }
-    });
-    measure("typed-arena", N, || {
-        let a = typed_arena::Arena::new();
-        for i in 0u64..1000 {
-            black_box(a.alloc(black_box(i)));
-        }
-    });
+    for n in [64usize, 1024] {
+        g.throughput(Throughput::Elements(n as u64));
 
-    println!("\n=== alloc_slice n=64 ===");
-    measure("fastarena", N, || {
-        let mut a = Arena::with_capacity(1024);
-        black_box(a.alloc_slice(0u32..64));
-    });
-    measure("bumpalo", N, || {
-        let a = Bump::with_capacity(1024);
-        black_box(a.alloc_slice_fill_with(64, |_| black_box(0u32)));
-    });
-    measure("typed-arena", N, || {
-        let a = typed_arena::Arena::new();
-        black_box((0u32..64).map(|i| a.alloc(i)).collect::<Vec<_>>());
-    });
+        g.bench_with_input(BenchmarkId::new("fastarena", n), &n, |b, &n| {
+            b.iter(|| {
+                let mut a = Arena::with_capacity(n * 8 * 4);
+                black_box(a.alloc_slice(0u32..n as u32));
+            });
+        });
 
-    println!("\n=== alloc_slice n=1024 ===");
-    measure("fastarena", N / 4, || {
-        let mut a = Arena::with_capacity(8 * 1024);
-        black_box(a.alloc_slice(0u32..1024));
-    });
-    measure("bumpalo", N / 4, || {
-        let a = Bump::with_capacity(8 * 1024);
-        black_box(a.alloc_slice_fill_with(1024, |_| black_box(0u32)));
-    });
+        g.bench_with_input(BenchmarkId::new("bumpalo", n), &n, |b, &n| {
+            b.iter(|| {
+                let a = Bump::with_capacity(n * 8 * 4);
+                black_box(a.alloc_slice_fill_with(n, |_| black_box(0u32)));
+            });
+        });
 
-    println!("\n=== string allocation ===");
-    measure("fastarena", N, || {
-        let mut a = Arena::with_capacity(1024);
-        for _ in 0..100 {
-            black_box(a.alloc_str("hello world this is a test string"));
+        if n <= 64 {
+            g.bench_with_input(BenchmarkId::new("typed-arena", n), &n, |b, &n| {
+                b.iter(|| {
+                    let a = typed_arena::Arena::new();
+                    black_box((0u32..n as u32).map(|i| a.alloc(i)).collect::<Vec<_>>());
+                });
+            });
         }
-    });
-    measure("bumpalo", N, || {
-        let a = Bump::with_capacity(1024);
-        for _ in 0..100 {
-            black_box(a.alloc_str("hello world this is a test string"));
-        }
+    }
+
+    g.finish();
+}
+
+fn bench_string_comparison(c: &mut Criterion) {
+    let mut g = c.benchmark_group("alloc_str x100");
+    g.throughput(Throughput::Elements(100));
+
+    g.bench_function("fastarena", |b| {
+        b.iter(|| {
+            let mut a = Arena::with_capacity(1024);
+            for _ in 0..100 {
+                black_box(a.alloc_str("hello world this is a test string"));
+            }
+        });
     });
 
-    println!("\n=== reset/clear ===");
-    measure("fastarena reset (1 block)", N / 10, || {
-        let mut a = Arena::with_capacity(64 * 1024);
-        for _ in 0..1000 {
-            let _ = a.alloc(0u64);
-        }
-        a.reset();
-    });
-    measure("fastarena reset (4 blocks)", N / 10, || {
-        let mut a = Arena::with_capacity(64);
-        for _ in 0..4000 {
-            let _ = a.alloc(0u64);
-        }
-        a.reset();
-    });
-    measure("bumpalo reset", N / 10, || {
-        let mut a = Bump::with_capacity(64 * 1024);
-        for _ in 0..1000 {
-            let _ = a.alloc(0u64);
-        }
-        a.reset();
-    });
-    measure("typed-arena drop", N / 10, || {
-        for _ in 0..1000 {
-            let a = typed_arena::Arena::new();
-            let _ = a.alloc(0u64);
-        }
+    g.bench_function("bumpalo", |b| {
+        b.iter(|| {
+            let a = Bump::with_capacity(1024);
+            for _ in 0..100 {
+                black_box(a.alloc_str("hello world this is a test string"));
+            }
+        });
     });
 
-    println!("\n=== ArenaVec vs Vec ===");
+    g.finish();
+}
+
+fn bench_reset_comparison(c: &mut Criterion) {
+    let mut g = c.benchmark_group("reset x1000 allocs");
+
+    g.bench_function("fastarena (1 block)", |b| {
+        b.iter(|| {
+            let mut a = Arena::with_capacity(64 * 1024);
+            for _ in 0..1000 {
+                let _ = a.alloc(0u64);
+            }
+            a.reset();
+        });
+    });
+
+    g.bench_function("fastarena (4 blocks)", |b| {
+        b.iter(|| {
+            let mut a = Arena::with_capacity(64);
+            for _ in 0..4000 {
+                let _ = a.alloc(0u64);
+            }
+            a.reset();
+        });
+    });
+
+    g.bench_function("bumpalo", |b| {
+        b.iter(|| {
+            let mut a = Bump::with_capacity(64 * 1024);
+            for _ in 0..1000 {
+                let _ = a.alloc(0u64);
+            }
+            a.reset();
+        });
+    });
+
+    g.bench_function("typed-arena (drop+new)", |b| {
+        b.iter(|| {
+            for _ in 0..1000 {
+                let a = typed_arena::Arena::new();
+                let _ = a.alloc(0u64);
+            }
+        });
+    });
+
+    g.finish();
+}
+
+fn bench_arena_vec_comparison(c: &mut Criterion) {
+    let mut g = c.benchmark_group("ArenaVec");
+
     for n in [16usize, 256, 4096] {
-        measure(
-            &format!("fastarena ArenaVec n={n}"),
-            N / (n as u64 / 16 + 1),
-            || {
+        g.throughput(Throughput::Elements(n as u64));
+
+        g.bench_with_input(BenchmarkId::new("fastarena ArenaVec", n), &n, |b, &n| {
+            b.iter(|| {
                 let mut a = Arena::with_capacity(n * 16);
                 let s = {
                     let mut v = ArenaVec::<u64>::with_capacity(&mut a, n);
@@ -117,88 +157,136 @@ fn main() {
                     v.finish()
                 };
                 black_box(s);
-            },
-        );
-        measure(
-            &format!("bumpalo Vec              n={n}"),
-            N / (n as u64 / 16 + 1),
-            || {
+            });
+        });
+
+        g.bench_with_input(BenchmarkId::new("bumpalo Vec", n), &n, |b, &n| {
+            b.iter(|| {
                 let a = Bump::with_capacity(n * 16);
                 let v: Vec<_> = (0u64..n as u64).map(|i| black_box(a.alloc(i))).collect();
                 black_box(v);
-            },
-        );
-        measure(
-            &format!("typed-arena Vec          n={n}"),
-            N / (n as u64 / 16 + 1),
-            || {
+            });
+        });
+
+        g.bench_with_input(BenchmarkId::new("typed-arena Vec", n), &n, |b, &n| {
+            b.iter(|| {
                 let a = typed_arena::Arena::new();
                 let v: Vec<_> = (0u64..n as u64).map(|i| a.alloc(black_box(i))).collect();
                 black_box(v);
-            },
-        );
+            });
+        });
     }
 
-    println!("\n=== throughput 10k allocs ===");
-    measure("fastarena + reset", N / 100, || {
-        let mut a = Arena::with_capacity(10_000 * 16);
-        for i in 0u64..10_000 {
-            let _ = a.alloc(black_box(i));
-        }
-        a.reset();
-    });
-    measure("bumpalo + reset", N / 100, || {
-        let mut a = Bump::with_capacity(10_000 * 16);
-        for i in 0u64..10_000 {
-            let _ = a.alloc(black_box(i));
-        }
-        a.reset();
-    });
-    measure("typed-arena + drop", N / 100, || {
-        for i in 0u64..10_000 {
-            let a = typed_arena::Arena::new();
-            let _ = a.alloc(black_box(i));
-        }
-    });
-
-    println!("\n=== large allocation (> 64KB block) ===");
-    measure("fastarena 128KB alloc", N / 10, || {
-        let mut a = Arena::with_capacity(64 * 1024);
-        black_box(a.alloc_raw(128 * 1024, 1));
-    });
-    measure("bumpalo 128KB alloc", N / 10, || {
-        let a = Bump::with_capacity(64 * 1024);
-        black_box(a.alloc(128 * 1024));
-    });
-
-    println!("\n=== nested/allocation depth ===");
-    measure("fastarena depth 10", N / 10, || {
-        let mut a = Arena::with_capacity(64 * 1024);
-        fn alloc_depth(a: &mut Arena, depth: usize) {
-            if depth == 0 {
-                return;
-            }
-            for _ in 0..100 {
-                black_box(a.alloc(0u64));
-            }
-            alloc_depth(a, depth - 1);
-        }
-        alloc_depth(&mut a, 10);
-        a.reset();
-    });
-    measure("bumpalo depth 10", N / 10, || {
-        let a = Bump::with_capacity(64 * 1024);
-        fn alloc_depth(a: &Bump, depth: usize) {
-            if depth == 0 {
-                return;
-            }
-            for _ in 0..100 {
-                black_box(a.alloc(0u64));
-            }
-            alloc_depth(a, depth - 1);
-        }
-        alloc_depth(&a, 10);
-    });
-
-    println!();
+    g.finish();
 }
+
+fn bench_throughput_comparison(c: &mut Criterion) {
+    let mut g = c.benchmark_group("throughput 10k");
+    g.throughput(Throughput::Elements(10_000));
+
+    g.bench_function("fastarena + reset", |b| {
+        b.iter(|| {
+            let mut a = Arena::with_capacity(10_000 * 16);
+            for i in 0u64..10_000 {
+                let _ = a.alloc(black_box(i));
+            }
+            a.reset();
+        });
+    });
+
+    g.bench_function("bumpalo + reset", |b| {
+        b.iter(|| {
+            let mut a = Bump::with_capacity(10_000 * 16);
+            for i in 0u64..10_000 {
+                let _ = a.alloc(black_box(i));
+            }
+            a.reset();
+        });
+    });
+
+    g.bench_function("typed-arena + drop", |b| {
+        b.iter(|| {
+            for i in 0u64..10_000 {
+                let a = typed_arena::Arena::new();
+                let _ = a.alloc(black_box(i));
+            }
+        });
+    });
+
+    g.finish();
+}
+
+fn bench_large_alloc_comparison(c: &mut Criterion) {
+    let mut g = c.benchmark_group("large alloc 128KB");
+    g.throughput(Throughput::Bytes(128 * 1024));
+
+    g.bench_function("fastarena", |b| {
+        b.iter(|| {
+            let mut a = Arena::with_capacity(64 * 1024);
+            black_box(a.alloc_raw(128 * 1024, 1));
+        });
+    });
+
+    g.bench_function("bumpalo", |b| {
+        b.iter(|| {
+            let a = Bump::with_capacity(64 * 1024);
+            black_box(a.alloc(128 * 1024));
+        });
+    });
+
+    g.finish();
+}
+
+fn bench_nested_depth_comparison(c: &mut Criterion) {
+    let mut g = c.benchmark_group("nested depth 10");
+    g.throughput(Throughput::Elements(1000));
+
+    g.bench_function("fastarena", |b| {
+        b.iter(|| {
+            let mut a = Arena::with_capacity(64 * 1024);
+            fn alloc_depth(a: &mut Arena, depth: usize) {
+                if depth == 0 {
+                    return;
+                }
+                for _ in 0..100 {
+                    black_box(a.alloc(0u64));
+                }
+                alloc_depth(a, depth - 1);
+            }
+            alloc_depth(&mut a, 10);
+            a.reset();
+        });
+    });
+
+    g.bench_function("bumpalo", |b| {
+        b.iter(|| {
+            let a = Bump::with_capacity(64 * 1024);
+            fn alloc_depth(a: &Bump, depth: usize) {
+                if depth == 0 {
+                    return;
+                }
+                for _ in 0..100 {
+                    black_box(a.alloc(0u64));
+                }
+                alloc_depth(a, depth - 1);
+            }
+            alloc_depth(&a, 10);
+        });
+    });
+
+    g.finish();
+}
+
+criterion_group!(
+    benches,
+    bench_alloc_comparison,
+    bench_alloc_slice_comparison,
+    bench_string_comparison,
+    bench_reset_comparison,
+    bench_arena_vec_comparison,
+    bench_throughput_comparison,
+    bench_large_alloc_comparison,
+    bench_nested_depth_comparison,
+);
+
+criterion_main!(benches);

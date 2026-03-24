@@ -183,7 +183,9 @@ impl<T, const N: usize> InlineVec<T, N> {
         let new_ptr = heap_alloc::<T>(new_cap);
         unsafe { ptr::copy_nonoverlapping(old_ptr, new_ptr, self.len) };
         let old_layout = Layout::array::<T>(old_cap).expect("InlineVec: layout overflow");
-        unsafe { dealloc(old_ptr as *mut u8, old_layout) };
+        if old_layout.size() > 0 {
+            unsafe { dealloc(old_ptr as *mut u8, old_layout) };
+        }
         self.data = Storage {
             heap: ManuallyDrop::new(HeapBuf {
                 ptr: new_ptr,
@@ -246,7 +248,9 @@ impl<T, const N: usize> Drop for InlineVec<T, N> {
             let cap = unsafe { (*self.data.heap).cap };
             let raw = unsafe { (*self.data.heap).ptr } as *mut u8;
             let layout = Layout::array::<T>(cap).expect("InlineVec: layout overflow on drop");
-            unsafe { dealloc(raw, layout) };
+            if layout.size() > 0 {
+                unsafe { dealloc(raw, layout) };
+            }
         }
     }
 }
@@ -259,6 +263,9 @@ impl<T, const N: usize> Drop for InlineVec<T, N> {
 /// would overflow.
 fn heap_alloc<T>(cap: usize) -> *mut T {
     let layout = Layout::array::<T>(cap).expect("InlineVec: layout overflow");
+    if layout.size() == 0 {
+        return std::ptr::NonNull::dangling().as_ptr();
+    }
     let raw = unsafe { alloc(layout) };
     if raw.is_null() {
         panic!("InlineVec: out of memory")

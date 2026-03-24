@@ -14,32 +14,40 @@ pub(crate) struct Block {
     /// Total capacity of this block in bytes.
     pub(crate) capacity: usize,
     /// Base address of the allocated memory.
-    pub(crate) base: usize,
+    pub(crate) base: *mut u8,
     /// Owning pointer for deallocation on drop.
     ptr: NonNull<u8>,
+    /// Alignment used when this block was allocated (needed for dealloc and block scan).
+    pub(crate) align: usize,
 }
 
+/// Minimum alignment guaranteed by every block.
+pub(crate) const MIN_BLOCK_ALIGN: usize = 64;
+
 impl Block {
-    /// Creates a new block with the given capacity in bytes.
+    /// Creates a new block with the given capacity and alignment.
     ///
     /// Panics if allocation fails.
-    pub(crate) fn new(capacity: usize) -> Self {
-        Self::try_new(capacity).expect("arena: out of memory")
+    pub(crate) fn new(capacity: usize, align: usize) -> Self {
+        Self::try_new(capacity, align).expect("arena: out of memory")
     }
 
     /// Creates a new block, returning `None` if capacity is 0 or allocation fails.
-    pub(crate) fn try_new(capacity: usize) -> Option<Self> {
+    ///
+    /// `align` must be a power of two and is clamped to at least [`MIN_BLOCK_ALIGN`].
+    pub(crate) fn try_new(capacity: usize, align: usize) -> Option<Self> {
         if capacity == 0 {
             return None;
         }
-        let layout = Layout::from_size_align(capacity, 8).ok()?;
+        let align = align.max(MIN_BLOCK_ALIGN);
+        let layout = Layout::from_size_align(capacity, align).ok()?;
         let ptr = NonNull::new(unsafe { alloc(layout) })?;
-        let base = ptr.as_ptr() as usize;
         Some(Block {
             ptr,
-            base,
+            base: ptr.as_ptr(),
             capacity,
             offset: 0,
+            align,
         })
     }
 
@@ -52,14 +60,16 @@ impl Block {
     /// Returns `None` if the block doesn't have enough space.
     #[inline(always)]
     pub(crate) fn try_alloc(&mut self, size: usize, align: usize) -> Option<(NonNull<u8>, usize)> {
-        let aligned = align_up(self.base + self.offset, align);
-        let new_offset = (aligned - self.base).checked_add(size)?;
+        let base_usize = self.base as usize;
+        let aligned = align_up(base_usize + self.offset, align);
+        let new_offset = (aligned - base_usize).checked_add(size)?;
         if new_offset > self.capacity {
             return None;
         }
         let delta = new_offset - self.offset;
         self.offset = new_offset;
-        Some((unsafe { NonNull::new_unchecked(aligned as *mut u8) }, delta))
+        let ptr = unsafe { self.base.add(aligned - base_usize) };
+        Some((unsafe { NonNull::new_unchecked(ptr) }, delta))
     }
 
     /// Returns the number of bytes remaining in this block for allocation.
@@ -72,7 +82,7 @@ impl Block {
 
 impl Drop for Block {
     fn drop(&mut self) {
-        let layout = unsafe { Layout::from_size_align_unchecked(self.capacity, 8) };
+        let layout = unsafe { Layout::from_size_align_unchecked(self.capacity, self.align) };
         unsafe { dealloc(self.ptr.as_ptr(), layout) };
     }
 }
@@ -89,12 +99,12 @@ mod tests {
 
     #[test]
     fn try_new_zero() {
-        assert!(Block::try_new(0).is_none());
+        assert!(Block::try_new(0, 8).is_none());
     }
 
     #[test]
     fn try_alloc_ok() {
-        let mut b = Block::new(256);
+        let mut b = Block::new(256, 8);
         let (ptr, delta) = b.try_alloc(8, 8).unwrap();
         assert_eq!(ptr.as_ptr() as usize % 8, 0);
         assert_eq!(delta, 8);
@@ -102,7 +112,7 @@ mod tests {
 
     #[test]
     fn alloc_padding_in_delta() {
-        let mut b = Block::new(256);
+        let mut b = Block::new(256, 8);
         b.try_alloc(1, 1).unwrap();
         let (_, d) = b.try_alloc(8, 8).unwrap();
         assert_eq!(d, 15); // 7 padding + 8 payload
@@ -110,14 +120,14 @@ mod tests {
 
     #[test]
     fn alloc_none_when_full() {
-        let mut b = Block::new(16);
+        let mut b = Block::new(16, 8);
         b.try_alloc(16, 1).unwrap();
         assert!(b.try_alloc(1, 1).is_none());
     }
 
     #[test]
     fn reset_reuse() {
-        let mut b = Block::new(64);
+        let mut b = Block::new(64, 8);
         let (p1, _) = b.try_alloc(32, 8).unwrap();
         b.offset = 0;
         let (p2, _) = b.try_alloc(32, 8).unwrap();

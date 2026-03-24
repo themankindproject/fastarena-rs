@@ -57,6 +57,9 @@ jobs:
       - name: Run integration tests
         run: cargo test --tests
 
+      - name: Run integration tests (with drop-tracking)
+        run: cargo test --tests --features drop-tracking
+
       - name: Build release
         run: cargo build --release
 
@@ -68,6 +71,45 @@ jobs:
 
       - name: Run rustfmt
         run: cargo fmt --all -- --check
+
+  miri:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust nightly with Miri
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-miri-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run Miri (no features)
+        run: cargo miri test --lib
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation -Zmiri-strict-provenance
+
+      - name: Run Miri (with drop-tracking)
+        run: cargo miri test --lib --features drop-tracking
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation -Zmiri-strict-provenance
+
+      - name: Run Miri integration tests (skip slow/large tests)
+        run: cargo miri test --tests -- --skip large_alloc --skip savepoint --skip nested --skip transaction_budget --skip alloc_slice
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation -Zmiri-strict-provenance
+
+      - name: Run Miri integration tests with drop-tracking (skip slow/large tests)
+        run: cargo miri test --tests --features drop-tracking -- --skip large_alloc --skip savepoint --skip nested --skip transaction_budget --skip alloc_slice
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation -Zmiri-strict-provenance
 
   doc:
     runs-on: ubuntu-latest

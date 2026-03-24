@@ -178,7 +178,7 @@ impl<'arena> Transaction<'arena> {
     /// total.
     #[inline(always)]
     pub fn bytes_used(&self) -> usize {
-        let current_used = self.arena.cur_ptr as usize - self.arena.cur_base;
+        let current_used = self.arena.cur_ptr as usize - self.arena.cur_base as usize;
         (self.arena.bytes_allocated + current_used).saturating_sub(self.bytes_at_open)
     }
 

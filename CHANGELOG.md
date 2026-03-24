@@ -252,3 +252,7 @@ Initial release.
 - README with Quick Start, feature showcases, and benchmarks
 - USAGE.md with full API reference and best practices
 - Inline `///` docs on all public items
+
+
+[0.1.1]: https://github.com/themankindproject/fastarena-rs/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/themankindproject/fastarena-rs/releases/tag/v0.1.0
