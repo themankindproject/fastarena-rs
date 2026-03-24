@@ -21,7 +21,7 @@ fn main() {
         }
 
         let _final_ast = outer.alloc_str("confirmed");
-        outer.commit();
+        let _ = outer.commit();
         println!("outer committed successfully");
     }
 
@@ -41,15 +41,15 @@ fn main() {
                 let mut t3 = t2.savepoint();
                 t3.alloc(3u32);
                 println!("t3 depth={}", t3.depth());
-                t3.commit();
+                let _ = t3.commit();
             }
 
             println!("t2 arena_depth after t3 commit: {}", t2.arena_depth());
-            t2.commit();
+            let _ = t2.commit();
         }
 
         println!("t1 arena_depth after t2 commit: {}", t1.arena_depth());
-        t1.commit();
+        let _ = t1.commit();
     }
     println!("Final depth: {}", arena.transaction_depth());
 
@@ -70,6 +70,6 @@ fn main() {
 
         assert_eq!(outer.bytes_used(), after_outer);
         println!("Savepoint rollback preserved parent: {} bytes", after_outer);
-        outer.commit();
+        let _ = outer.commit();
     }
 }

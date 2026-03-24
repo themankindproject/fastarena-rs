@@ -74,7 +74,7 @@ fn bench_checkpoint_rewind(c: &mut Criterion) {
             let mut a = Arena::new();
             let _ = a.alloc(0u64);
             for _ in 0..100 {
-                black_box(a.checkpoint());
+                let _ = black_box(a.checkpoint());
             }
         });
     });
@@ -139,7 +139,7 @@ fn bench_transaction(c: &mut Criterion) {
         b.iter(|| {
             let mut a = Arena::new();
             for _ in 0..100 {
-                black_box(a.transaction().commit());
+                let _ = black_box(a.transaction().commit());
             }
         });
     });
@@ -152,7 +152,7 @@ fn bench_transaction(c: &mut Criterion) {
                 for _ in 0..16 {
                     let _ = t.alloc(black_box(0u64));
                 }
-                black_box(t.commit());
+                let _ = black_box(t.commit());
             }
             a.reset();
         });

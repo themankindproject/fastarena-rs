@@ -71,7 +71,7 @@ fn macro_with_transaction() {
         let v = arenavec![in txn.arena_mut(); 10u32, 20, 30];
         assert_eq!(v.as_slice(), &[10, 20, 30]);
     }
-    txn.commit();
+    let _ = txn.commit();
 }
 
 #[test]

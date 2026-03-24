@@ -182,7 +182,7 @@ fn depth_increments_on_open() {
     let txn = arena.transaction();
     assert_eq!(txn.arena_depth(), 1);
     assert_eq!(txn.depth(), 1);
-    txn.commit();
+    let _ = txn.commit();
     assert_eq!(arena.transaction_depth(), 0);
 }
 
@@ -197,13 +197,13 @@ fn depth_increments_for_savepoints() {
         {
             let t3 = t2.savepoint();
             assert_eq!(t3.depth(), 3);
-            t3.commit();
+            let _ = t3.commit();
         }
         assert_eq!(t2.arena_depth(), 2);
-        t2.commit();
+        let _ = t2.commit();
     }
     assert_eq!(t1.arena_depth(), 1);
-    t1.commit();
+    let _ = t1.commit();
     assert_eq!(arena.transaction_depth(), 0);
 }
 
@@ -224,7 +224,7 @@ fn budget_allows_exact_usage() {
     txn.set_limit(8);
     let _ = txn.alloc(0u64);
     assert_eq!(txn.budget_remaining(), Some(0));
-    txn.commit();
+    let _ = txn.commit();
 }
 
 #[test]
@@ -235,7 +235,7 @@ fn budget_try_alloc_returns_none_when_exceeded() {
     let _ = txn.alloc(0u32);
     let r = txn.try_alloc(0u32);
     assert!(r.is_none(), "budget exceeded");
-    txn.commit();
+    let _ = txn.commit();
 }
 
 #[test]
@@ -259,7 +259,7 @@ fn budget_remaining_none_without_limit() {
     assert_eq!(txn.budget_remaining(), None);
     let _ = txn.alloc(0u64);
     assert_eq!(txn.budget_remaining(), None);
-    txn.commit();
+    let _ = txn.commit();
 }
 
 #[test]
@@ -271,7 +271,7 @@ fn budget_try_alloc_str_respects_limit() {
     assert!(r.is_none());
     let ok = txn.try_alloc_str("hi");
     assert_eq!(ok, Some("hi"));
-    txn.commit();
+    let _ = txn.commit();
 }
 
 #[test]
@@ -281,7 +281,7 @@ fn diff_zero_on_empty_txn() {
     let diff = txn.diff();
     assert_eq!(diff.bytes_allocated, 0);
     assert_eq!(diff.blocks_touched, 1);
-    txn.commit();
+    let _ = txn.commit();
 }
 
 #[test]
@@ -292,7 +292,7 @@ fn diff_reflects_allocations() {
     let _ = txn.alloc(0u64);
     let diff = txn.diff();
     assert!(diff.bytes_allocated >= 16, "two u64s = 16 bytes minimum");
-    txn.commit();
+    let _ = txn.commit();
 }
 
 #[test]
@@ -307,7 +307,7 @@ fn diff_blocks_touched_increases_across_blocks() {
         diff.blocks_touched >= 2,
         "160+ bytes into 32-byte blocks must touch multiple blocks"
     );
-    txn.commit();
+    let _ = txn.commit();
 }
 
 #[test]
@@ -319,7 +319,7 @@ fn bytes_used_is_o1() {
     }
     let used = txn.bytes_used();
     assert!(used >= 8000, "expected >= 8000 bytes, got {used}");
-    txn.commit();
+    let _ = txn.commit();
     assert!(arena.stats().bytes_allocated >= 8000);
 }
 
@@ -335,7 +335,7 @@ fn commit_depth_decremented() {
     let mut arena = Arena::new();
     let txn = arena.transaction();
     assert_eq!(txn.arena_depth(), 1);
-    txn.commit();
+    let _ = txn.commit();
     assert_eq!(arena.transaction_depth(), 0);
 }
 
@@ -344,7 +344,7 @@ fn commit_allocations_survive() {
     let mut arena = Arena::new();
     let mut txn = arena.transaction();
     let _ = txn.alloc(42u64);
-    txn.commit();
+    let _ = txn.commit();
     assert!(arena.stats().bytes_allocated >= 8);
 }
 
@@ -370,12 +370,12 @@ fn nested_txn_across_multiple_blocks() {
             let _ = inner.alloc(0u64);
         }
         assert!(inner.diff().blocks_touched >= 2);
-        inner.commit();
+        let _ = inner.commit();
     }
 
     let diff = outer.diff();
     assert!(diff.bytes_allocated >= 200 + 4);
-    outer.commit();
+    let _ = outer.commit();
 }
 
 #[test]
@@ -421,7 +421,7 @@ fn nested_savepoint_partial_rollback_partial_commit() {
         after_outer_alloc,
         "savepoint rollback must not affect parent"
     );
-    outer.commit();
+    let _ = outer.commit();
 }
 
 #[test]
@@ -434,11 +434,11 @@ fn large_alloc_in_savepoint_committed() {
         let big: &mut [u8] = sp.alloc_slice(vec![0xFFu8; MEBI]);
         assert_eq!(big.len(), MEBI);
         assert!(big.iter().all(|&b| b == 0xFF));
-        sp.commit();
+        let _ = sp.commit();
     }
     let diff = txn.diff();
     assert!(diff.bytes_allocated >= 1024 * 1024);
-    txn.commit();
+    let _ = txn.commit();
 }
 
 #[test]
@@ -458,7 +458,7 @@ fn large_alloc_in_savepoint_rolled_back() {
             0,
             "savepoint rollback must undo large alloc"
         );
-        txn.commit();
+        let _ = txn.commit();
     }
 
     assert_eq!(arena.stats().bytes_allocated, 0);
@@ -496,7 +496,7 @@ fn alloc_4096_in_transaction() {
     let _ = txn.alloc(1u8);
     let ptr = txn.alloc_raw(128, 4096);
     assert_eq!(ptr.as_ptr() as usize % 4096, 0);
-    txn.commit();
+    let _ = txn.commit();
 }
 
 #[test]
@@ -545,7 +545,7 @@ fn nested_savepoint_panic_only_rolls_back_inner() {
         }));
 
         assert!(txn.bytes_used() >= outer_bytes);
-        txn.commit();
+        let _ = txn.commit();
     }
 
     assert!(arena.stats().bytes_allocated >= 8, "outer alloc survived");
@@ -635,7 +635,7 @@ fn arena_vec_inside_transaction_committed() {
         };
         assert_eq!(v, &[1, 2, 3]);
     }
-    txn.commit();
+    let _ = txn.commit();
     assert!(arena.stats().bytes_allocated >= 12);
 }
 
@@ -754,7 +754,7 @@ mod drop_tracking_tests {
         {
             let mut txn = arena.transaction();
             let _ = txn.alloc(Tracked(99));
-            txn.commit();
+            let _ = txn.commit();
         }
         assert_eq!(
             COUNTER.load(Ordering::Relaxed),
@@ -967,7 +967,7 @@ fn transaction_alloc_slice_copy_basic() {
     assert_eq!(dst, &[1, 2, 3, 4, 5]);
     let ptr = dst.as_ptr();
     let len = dst.len();
-    txn.commit();
+    let _ = txn.commit();
     // Verify data survived commit
     let s = unsafe { std::slice::from_raw_parts(ptr, len) };
     assert_eq!(s, &[1, 2, 3, 4, 5]);
@@ -993,7 +993,7 @@ fn transaction_alloc_slice_copy_budget() {
     // 4 * 4 = 16 bytes — exactly at budget
     let _ = txn.alloc_slice_copy(&[0u32; 4]);
     assert_eq!(txn.budget_remaining(), Some(0));
-    txn.commit();
+    let _ = txn.commit();
 }
 
 #[test]
@@ -1004,7 +1004,7 @@ fn transaction_alloc_slice_copy_budget_panic() {
     txn.set_limit(8);
     // 4 * 4 = 16 bytes — exceeds budget
     let _ = txn.alloc_slice_copy(&[0u32; 4]);
-    txn.commit();
+    let _ = txn.commit();
 }
 
 #[test]
@@ -1014,7 +1014,7 @@ fn transaction_try_alloc_slice_copy_success() {
     let result = txn.try_alloc_slice_copy(&[10u64, 20, 30]);
     assert!(result.is_some());
     assert_eq!(result.unwrap(), &[10, 20, 30]);
-    txn.commit();
+    let _ = txn.commit();
 }
 
 #[test]
@@ -1028,7 +1028,7 @@ fn transaction_try_alloc_slice_copy_budget_exceeded() {
     // Can still allocate within budget
     let ok = txn.try_alloc_slice_copy(&[0u32; 2]); // 8 bytes
     assert!(ok.is_some());
-    txn.commit();
+    let _ = txn.commit();
 }
 
 #[test]
@@ -1039,7 +1039,7 @@ fn transaction_try_alloc_cache_aligned_success() {
     assert!(ptr.is_some());
     let p = ptr.unwrap().as_ptr() as usize;
     assert_eq!(p % 64, 0, "must be 64-byte aligned");
-    txn.commit();
+    let _ = txn.commit();
 }
 
 #[test]
@@ -1051,5 +1051,60 @@ fn transaction_try_alloc_cache_aligned_budget() {
     assert!(result.is_none(), "128 bytes exceeds 100 byte budget");
     let ok = txn.try_alloc_cache_aligned(64);
     assert!(ok.is_some());
-    txn.commit();
+    let _ = txn.commit();
+}
+
+#[test]
+fn arena_vec_truncate() {
+    let mut arena = Arena::new();
+    let mut v = ArenaVec::new(&mut arena);
+    v.extend_exact([1u32, 2, 3, 4, 5]);
+    v.truncate(3);
+    assert_eq!(v.as_slice(), &[1, 2, 3]);
+    assert_eq!(v.len(), 3);
+}
+
+#[test]
+fn arena_vec_truncate_noop() {
+    let mut arena = Arena::new();
+    let mut v = ArenaVec::new(&mut arena);
+    v.extend_exact([1u32, 2, 3]);
+    v.truncate(10); // greater than len, should be no-op
+    assert_eq!(v.as_slice(), &[1, 2, 3]);
+}
+
+#[test]
+fn arena_vec_truncate_zero() {
+    let mut arena = Arena::new();
+    let mut v = ArenaVec::new(&mut arena);
+    v.extend_exact([1u32, 2, 3]);
+    v.truncate(0);
+    assert!(v.is_empty());
+}
+
+#[test]
+fn arena_vec_resize_grow() {
+    let mut arena = Arena::new();
+    let mut v = ArenaVec::new(&mut arena);
+    v.extend_exact([1u32, 2, 3]);
+    v.resize(5, 0);
+    assert_eq!(v.as_slice(), &[1, 2, 3, 0, 0]);
+}
+
+#[test]
+fn arena_vec_resize_shrink() {
+    let mut arena = Arena::new();
+    let mut v = ArenaVec::new(&mut arena);
+    v.extend_exact([1u32, 2, 3, 4, 5]);
+    v.resize(2, 0);
+    assert_eq!(v.as_slice(), &[1, 2]);
+}
+
+#[test]
+fn arena_vec_resize_same() {
+    let mut arena = Arena::new();
+    let mut v = ArenaVec::new(&mut arena);
+    v.extend_exact([1u32, 2, 3]);
+    v.resize(3, 99);
+    assert_eq!(v.as_slice(), &[1, 2, 3]);
 }

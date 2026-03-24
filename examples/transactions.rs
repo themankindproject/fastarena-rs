@@ -43,7 +43,7 @@ fn main() {
         println!("manual txn: 2 allocs");
         println!("  bytes_used={}", txn.bytes_used());
         println!("  diff={:?}", txn.diff());
-        txn.commit();
+        let _ = txn.commit();
     }
 
     // Manual rollback (drop without commit)
@@ -74,6 +74,6 @@ fn main() {
             txn.diff().bytes_allocated,
             txn.diff().blocks_touched
         );
-        txn.commit();
+        let _ = txn.commit();
     }
 }

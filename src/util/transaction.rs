@@ -7,18 +7,39 @@ use crate::arena::{Arena, Checkpoint};
 
 /// Outcome of [`Transaction::commit`] or [`Transaction::rollback`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use = "transaction status indicates whether the operation succeeded"]
 pub enum TxnStatus {
     Committed,
     RolledBack,
 }
 
+impl std::fmt::Display for TxnStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TxnStatus::Committed => f.write_str("committed"),
+            TxnStatus::RolledBack => f.write_str("rolled back"),
+        }
+    }
+}
+
 /// Allocation metrics for a single transaction scope, returned by [`Transaction::diff`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[must_use = "transaction diff provides allocation metrics"]
 pub struct TxnDiff {
     /// Bytes allocated (including padding) since the transaction opened.
     pub bytes_allocated: usize,
     /// Arena blocks written to during this transaction. `>= 1`.
     pub blocks_touched: usize,
+}
+
+impl std::fmt::Display for TxnDiff {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} bytes in {} block(s)",
+            self.bytes_allocated, self.blocks_touched
+        )
+    }
 }
 
 /// A scoped RAII transaction over an [`Arena`].
@@ -442,7 +463,7 @@ where
     let mut txn = Transaction::new(arena);
     match f(&mut txn) {
         Ok(val) => {
-            txn.commit();
+            let _ = txn.commit();
             Ok(val)
         }
         Err(e) => Err(e),
@@ -473,7 +494,7 @@ where
 {
     let mut txn = Transaction::new(arena);
     let result = catch_unwind(AssertUnwindSafe(|| f(&mut txn)));
-    txn.commit();
+    let _ = txn.commit();
     match result {
         Ok(val) => val,
         Err(payload) => std::panic::panic_any(payload),

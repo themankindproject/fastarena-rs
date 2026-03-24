@@ -54,7 +54,7 @@ fn main() {
         txn.diff().bytes_allocated,
         txn.diff().blocks_touched
     );
-    txn.commit();
+    let _ = txn.commit();
 
     // --- Pre-allocated arena ---
     let arena = Arena::with_capacity(1024 * 1024); // 1 MiB

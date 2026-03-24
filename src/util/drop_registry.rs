@@ -87,29 +87,32 @@ impl DropRegistry {
     pub(crate) fn run_drops_until(&mut self, target_len: usize) {
         while self.slots.len() > target_len {
             let slot = self.slots.pop().unwrap();
-            let result = match slot {
-                DropSlot::Single { ptr, shim } => {
-                    catch_unwind(AssertUnwindSafe(|| unsafe { shim(ptr) }))
-                }
-                DropSlot::Range { ptr, count, shim } => {
-                    catch_unwind(AssertUnwindSafe(|| unsafe { shim(ptr, count) }))
-                }
-            };
+            let result = Self::run_slot(slot);
             if result.is_err() {
                 // Drain remaining entries, ignoring further panics, then re-raise.
-                while self.slots.len() > target_len {
-                    let slot = self.slots.pop().unwrap();
-                    match slot {
-                        DropSlot::Single { ptr, shim } => {
-                            let _ = catch_unwind(AssertUnwindSafe(|| unsafe { shim(ptr) }));
-                        }
-                        DropSlot::Range { ptr, count, shim } => {
-                            let _ = catch_unwind(AssertUnwindSafe(|| unsafe { shim(ptr, count) }));
-                        }
-                    }
-                }
+                self.drain_remaining(target_len);
                 std::panic::panic_any("DropRegistry: destructor panicked");
             }
+        }
+    }
+
+    /// Run a single drop slot, catching any panic.
+    fn run_slot(slot: DropSlot) -> Result<(), ()> {
+        match slot {
+            DropSlot::Single { ptr, shim } => {
+                catch_unwind(AssertUnwindSafe(|| unsafe { shim(ptr) })).map_err(|_| ())
+            }
+            DropSlot::Range { ptr, count, shim } => {
+                catch_unwind(AssertUnwindSafe(|| unsafe { shim(ptr, count) })).map_err(|_| ())
+            }
+        }
+    }
+
+    /// Drain all remaining slots, ignoring panics.
+    fn drain_remaining(&mut self, target_len: usize) {
+        while self.slots.len() > target_len {
+            let slot = self.slots.pop().unwrap();
+            let _ = Self::run_slot(slot);
         }
     }
 

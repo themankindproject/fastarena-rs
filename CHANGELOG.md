@@ -14,6 +14,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `arenavec![in &mut arena; 1, 2, 3]` — list of elements
   - `arenavec![in &mut arena; 0u32; 10]` — repeated element (requires `T: Clone`)
   - Single allocation in repeat form via `with_capacity` + `extend_exact`
+- `ArenaVec::truncate(len)` — shorten vector, dropping excess elements
+- `ArenaVec::resize(len, val)` — grow with cloned value or shrink (requires `T: Clone`)
+- `Display` impl for `ArenaStats` (shows allocated/reserved, block count, utilization %)
+- `Display` impl for `TxnStatus` (`"committed"` / `"rolled back"`)
+- `Display` impl for `TxnDiff` (`"N bytes in M block(s)"`)
+- `Display` impl for `Checkpoint` (shows block index, offset, bytes)
+- `#[must_use]` on `Checkpoint`, `ArenaStats`, `TxnStatus`, `TxnDiff`
+
+### Changed
+
+- Refactored `alloc_slow` / `alloc_slow_try` — extracted `finish_slow_path`,
+  `alloc_new_block`, `try_alloc_new_block` helpers to eliminate ~60 lines of
+  duplicated allocation logic.
+- Refactored `DropRegistry::run_drops_until` — extracted `run_slot` and
+  `drain_remaining` helpers to deduplicate panic-drain logic.
 
 ## [0.1.2] - 2026-03-24
 
@@ -268,6 +283,7 @@ Initial release.
 - USAGE.md with full API reference and best practices
 - Inline `///` docs on all public items
 
+[0.1.3]: https://github.com/themankindproject/fastarena-rs/compare/v0.1.2...HEAD
 [0.1.2]: https://github.com/themankindproject/fastarena-rs/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/themankindproject/fastarena-rs/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/themankindproject/fastarena-rs/releases/tag/v0.1.0

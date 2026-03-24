@@ -2,6 +2,7 @@
 ///
 /// All counters are maintained incrementally; `stats()` is O(1).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[must_use = "arena stats provide memory usage information"]
 pub struct ArenaStats {
     /// Bytes committed to live allocations, including alignment padding.
     /// Restored by [`super::allocator::Arena::rewind`] and zeroed by [`super::allocator::Arena::reset`].
@@ -29,5 +30,18 @@ impl ArenaStats {
     /// Bytes reserved but not currently allocated.
     pub fn bytes_idle(&self) -> usize {
         self.bytes_reserved.saturating_sub(self.bytes_allocated)
+    }
+}
+
+impl std::fmt::Display for ArenaStats {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{} allocated / {} reserved ({} blocks, {:.1}% util)",
+            self.bytes_allocated,
+            self.bytes_reserved,
+            self.block_count,
+            self.utilization() * 100.0
+        )
     }
 }

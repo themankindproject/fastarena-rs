@@ -39,7 +39,7 @@ fn main() {
     {
         let mut txn = arena.transaction();
         txn.alloc(String::from("committed-string"));
-        txn.commit();
+        let _ = txn.commit();
     }
     println!("committed txn => destructors NOT yet run");
     arena.reset();

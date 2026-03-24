@@ -130,7 +130,7 @@ fn arenavec_in_transaction() {
             v.extend_exact([1u32, 2, 3]);
             v.finish()
         };
-        txn.commit();
+        let _ = txn.commit();
     }
 
     println!("ArenaVec in transaction committed");

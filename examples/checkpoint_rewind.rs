@@ -58,7 +58,7 @@ fn main() {
         txn.alloc(2u32);
         txn.arena_mut().alloc(3u32);
         println!("txn bytes_used: {}", txn.bytes_used());
-        txn.commit();
+        let _ = txn.commit();
     }
 
     // --- Stats after reset cycle ---

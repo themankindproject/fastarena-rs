@@ -32,12 +32,23 @@ pub(crate) const CACHE_LINE_SIZE: usize = 64;
 /// Obtained via [`Arena::checkpoint`]. Must only be passed back to the arena
 /// that produced it — using it with a different arena panics.
 #[derive(Debug, Clone, Copy)]
+#[must_use = "checkpoint is useless unless passed to Arena::rewind"]
 pub struct Checkpoint {
     pub(crate) block_idx: usize,
     pub(crate) offset: usize,
     pub(crate) bytes_allocated: usize,
     #[cfg(feature = "drop-tracking")]
     pub(crate) drop_registry_len: usize,
+}
+
+impl std::fmt::Display for Checkpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Checkpoint(block={}, offset={}, bytes={})",
+            self.block_idx, self.offset, self.bytes_allocated
+        )
+    }
 }
 
 /// A bump-pointer arena allocator with RAII transactions, checkpoint/rewind,
@@ -895,21 +906,11 @@ impl Arena {
     /// Slow path: scans retained blocks for space, then allocates a new one.
     #[cold]
     fn alloc_slow(&mut self, size: usize, align: usize) -> NonNull<u8> {
-        self.bytes_allocated += self.cur_ptr as usize - self.cur_base as usize;
-        self.blocks[self.current].offset = self.cur_ptr as usize - self.cur_base as usize;
+        self.finish_slow_path(size, align);
 
         // For high-alignment requests, skip block scan entirely and allocate a new block.
         if align > MIN_BLOCK_ALIGN {
-            let block_size = self.next_block_for(size, align);
-            let mut block = Block::new(block_size, align);
-            let (ptr, delta) = block
-                .try_alloc(size, align)
-                .expect("fresh block must satisfy request");
-            self.bytes_reserved += block_size;
-            self.bytes_allocated += delta;
-            self.blocks.push(block);
-            self.set_current_block(self.blocks.len() - 1);
-            return ptr;
+            return self.alloc_new_block(size, align);
         }
 
         // Skip block scan entirely when no retained block has enough free space.
@@ -926,34 +927,17 @@ impl Arena {
             }
         }
 
-        let block_size = self.next_block_for(size, align);
-        let mut block = Block::new(block_size, align);
-        let (ptr, delta) = block
-            .try_alloc(size, align)
-            .expect("fresh block must satisfy request");
-        self.bytes_reserved += block_size;
-        self.bytes_allocated += delta;
-        self.blocks.push(block);
-        self.set_current_block(self.blocks.len() - 1);
-        ptr
+        self.alloc_new_block(size, align)
     }
 
     /// Slow path (fallible): scans retained blocks for space, then tries to allocate a new one.
     #[cold]
     fn alloc_slow_try(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
-        self.bytes_allocated += self.cur_ptr as usize - self.cur_base as usize;
-        self.blocks[self.current].offset = self.cur_ptr as usize - self.cur_base as usize;
+        self.finish_slow_path(size, align);
 
         // For high-alignment requests, skip block scan entirely and allocate a new block.
         if align > MIN_BLOCK_ALIGN {
-            let block_size = self.next_block_for(size, align);
-            let mut block = Block::try_new(block_size, align)?;
-            let (ptr, delta) = block.try_alloc(size, align)?;
-            self.bytes_reserved += block_size;
-            self.bytes_allocated += delta;
-            self.blocks.push(block);
-            self.set_current_block(self.blocks.len() - 1);
-            return Some(ptr);
+            return self.try_alloc_new_block(size, align);
         }
 
         // Skip block scan entirely when no retained block has enough free space.
@@ -970,6 +954,34 @@ impl Arena {
             }
         }
 
+        self.try_alloc_new_block(size, align)
+    }
+
+    /// Common slow-path setup: flushes the current block's state.
+    #[inline]
+    fn finish_slow_path(&mut self, _size: usize, _align: usize) {
+        self.bytes_allocated += self.cur_ptr as usize - self.cur_base as usize;
+        self.blocks[self.current].offset = self.cur_ptr as usize - self.cur_base as usize;
+    }
+
+    /// Allocate a new block (infallible). Panics if allocation fails.
+    #[inline]
+    fn alloc_new_block(&mut self, size: usize, align: usize) -> NonNull<u8> {
+        let block_size = self.next_block_for(size, align);
+        let mut block = Block::new(block_size, align);
+        let (ptr, delta) = block
+            .try_alloc(size, align)
+            .expect("fresh block must satisfy request");
+        self.bytes_reserved += block_size;
+        self.bytes_allocated += delta;
+        self.blocks.push(block);
+        self.set_current_block(self.blocks.len() - 1);
+        ptr
+    }
+
+    /// Allocate a new block (fallible). Returns None if allocation fails.
+    #[inline]
+    fn try_alloc_new_block(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
         let block_size = self.next_block_for(size, align);
         let mut block = Block::try_new(block_size, align)?;
         let (ptr, delta) = block.try_alloc(size, align)?;

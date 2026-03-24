@@ -524,6 +524,75 @@ impl<'arena, T> ArenaVec<'arena, T> {
         unsafe { core::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
     }
 
+    /// Shortens the vector, keeping the first `len` elements and dropping the rest.
+    ///
+    /// If `len` is greater than the vector's current length, this has no effect.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut v = ArenaVec::new(&mut arena);
+    /// v.extend_exact([1u32, 2, 3, 4, 5]);
+    /// v.truncate(3);
+    /// assert_eq!(v.as_slice(), &[1, 2, 3]);
+    /// ```
+    #[inline]
+    pub fn truncate(&mut self, len: usize) {
+        if len < self.len {
+            if mem::needs_drop::<T>() {
+                for i in len..self.len {
+                    unsafe { ptr::drop_in_place(self.ptr.as_ptr().add(i)) }
+                }
+            }
+            self.len = len;
+        }
+    }
+
+    /// Resizes the vector to `new_len` elements.
+    ///
+    /// If `new_len` is greater than the current length, `val` is cloned to fill
+    /// the difference. If `new_len` is less than the current length, the vector
+    /// is truncated.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the arena is out of memory and `new_len > self.len()`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use fastarena::{Arena, ArenaVec};
+    ///
+    /// let mut arena = Arena::new();
+    /// let mut v = ArenaVec::new(&mut arena);
+    /// v.extend_exact([1u32, 2, 3]);
+    /// v.resize(5, 0);
+    /// assert_eq!(v.as_slice(), &[1, 2, 3, 0, 0]);
+    /// v.resize(2, 0);
+    /// assert_eq!(v.as_slice(), &[1, 2]);
+    /// ```
+    pub fn resize(&mut self, new_len: usize, val: T)
+    where
+        T: Clone,
+    {
+        if new_len > self.len {
+            let extra = new_len - self.len;
+            if new_len > self.cap {
+                self.grow_to(new_len);
+            }
+            let dst = unsafe { self.ptr.as_ptr().add(self.len) };
+            for i in 0..extra {
+                unsafe { dst.add(i).write(val.clone()) };
+            }
+            self.len = new_len;
+        } else {
+            self.truncate(new_len);
+        }
+    }
+
     /// Consume the `ArenaVec`, returning a `&'arena mut [T]` backed by arena
     /// memory. The arena borrow is released; element destructors will **not**
     /// be called by `ArenaVec` after this point.

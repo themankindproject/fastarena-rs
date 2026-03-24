@@ -41,7 +41,7 @@ fn main() {
     txn.set_limit(3);
     let r = txn.try_alloc_str("hello");
     println!("try_alloc_str 'hello' with 3-byte budget: {r:?}");
-    txn.commit();
+    let _ = txn.commit();
 
     println!("\nAll fallible examples passed.");
 }

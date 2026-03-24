@@ -19,7 +19,7 @@ fn main() {
         txn.alloc_slice(vec![0u8; 2048]); // ok — 2048 arena bytes
         let remaining = txn.budget_remaining();
         println!("after 2048 bytes: remaining={remaining:?}");
-        txn.commit();
+        let _ = txn.commit();
     }
 
     // --- alloc panics when budget exceeded ---
@@ -42,7 +42,7 @@ fn main() {
         let r = txn.try_alloc(0u32);
         assert!(r.is_none(), "budget exceeded — try_alloc returns None");
         println!("try_alloc on exhausted budget => None");
-        txn.commit();
+        let _ = txn.commit();
     }
 
     // --- try_alloc_str respects budget ---
@@ -55,7 +55,7 @@ fn main() {
         let ok = txn.try_alloc_str("hi"); // 2 bytes <= 3
         assert_eq!(ok, Some("hi"));
         println!("try_alloc_str: 'hello' rejected, 'hi' accepted");
-        txn.commit();
+        let _ = txn.commit();
     }
 
     // --- try_alloc_slice respects budget ---
@@ -69,7 +69,7 @@ fn main() {
         assert!(ok.is_some());
         assert_eq!(ok.unwrap().len(), 50);
         println!("try_alloc_slice: 200 rejected, 50 accepted");
-        txn.commit();
+        let _ = txn.commit();
     }
 
     // --- No limit: budget_remaining is None ---
@@ -79,7 +79,7 @@ fn main() {
         txn.alloc(1u64);
         assert_eq!(txn.budget_remaining(), None);
         println!("no limit => budget_remaining = None");
-        txn.commit();
+        let _ = txn.commit();
     }
 
     // --- Why alloc(vec![...]) is misleading for budgets ---
@@ -93,7 +93,7 @@ fn main() {
             "alloc(vec![0u8; 1000]): arena used={} (Vec struct only), heap=~1000 (untracked)",
             txn.bytes_used()
         );
-        txn.commit();
+        let _ = txn.commit();
     }
 
     println!("\nAll budget examples passed.");
