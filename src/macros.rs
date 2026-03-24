@@ -1,4 +1,4 @@
-/// Creates an [`ArenaVec`] backed by the given arena.
+/// Creates an `ArenaVec` backed by the given arena.
 ///
 /// `arenavec!` allows `ArenaVec`s to be defined with a concise syntax.
 /// The arena reference always follows the `in` keyword.
