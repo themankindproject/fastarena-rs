@@ -5,6 +5,16 @@ All notable changes to `fastarena` will be documented in this file.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `arenavec!` macro — concise ArenaVec construction with three forms:
+  - `arenavec![in &mut arena]` — empty
+  - `arenavec![in &mut arena; 1, 2, 3]` — list of elements
+  - `arenavec![in &mut arena; 0u32; 10]` — repeated element (requires `T: Clone`)
+  - Single allocation in repeat form via `with_capacity` + `extend_exact`
+
 ## [0.1.2] - 2026-03-24
 
 ### Added

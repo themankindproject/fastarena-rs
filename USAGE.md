@@ -13,6 +13,7 @@
   - [Transactions — Auto-Rollback on Failure](#transactions--auto-rollback-on-failure)
   - [Nested Savepoints](#nested-savepoints)
   - [ArenaVec with `finish()`](#arenavec-with-finish--transfer-ownership-to-the-arena)
+  - [ArenaVec Macro (`arenavec!`)](#arenavec-macro)
   - [Transaction Budgets](#transaction-budgets--cap-memory-per-request)
   - [Drop-Tracking](#drop-tracking--opt-in-destructor-execution)
 - [API Reference](#api-reference)
@@ -46,6 +47,7 @@
 | Fallible allocation | Yes | Partial | No |
 | `alloc_cache_aligned` | Yes | No | No |
 | O(1) stats with utilization | Yes | Partial | No |
+| `arenavec!` macro | Yes | No | No |
 | Zero dependencies | Yes | Yes | Yes |
 
 ---
@@ -159,6 +161,20 @@ let items: &mut [u32] = {
 
 assert_eq!(items.len(), 1024);
 assert_eq!(items[512], 512);
+```
+
+Or use the `arenavec!` macro for concise initialization:
+
+```rust
+use fastarena::{Arena, arenavec};
+
+let mut arena = Arena::new();
+
+let items: &mut [u32] = arenavec![in &mut arena; 0u32; 1024].finish();
+assert_eq!(items[512], 0);
+
+let values: &mut [u32] = arenavec![in &mut arena; 1, 2, 3].finish();
+assert_eq!(values, &mut [1, 2, 3]);
 ```
 
 ### Transaction Budgets — Cap Memory per Request
@@ -481,6 +497,74 @@ let slice = {
     v.finish()
 };
 txn.commit(); // slice survives
+```
+
+#### `arenavec!` Macro
+
+The `arenavec!` macro provides concise `ArenaVec` construction. The arena
+reference always follows the `in` keyword.
+
+**Syntax:**
+
+```text
+arenavec![in &mut arena]            // empty
+arenavec![in &mut arena; 1, 2, 3]   // list of elements
+arenavec![in &mut arena; 0u32; 10]  // repeated element (requires T: Clone)
+```
+
+**Empty:**
+
+```rust
+use fastarena::{Arena, ArenaVec, arenavec};
+
+let mut arena = Arena::new();
+let v: ArenaVec<u32> = arenavec![in &mut arena];
+assert!(v.is_empty());
+```
+
+**List of elements:**
+
+```rust
+use fastarena::{Arena, arenavec};
+
+let mut arena = Arena::new();
+let v = arenavec![in &mut arena; 1u32, 2, 3];
+assert_eq!(v.as_slice(), &[1, 2, 3]);
+```
+
+**Repeated element** (requires `T: Clone`):
+
+```rust
+use fastarena::{Arena, arenavec};
+
+let mut arena = Arena::new();
+let v = arenavec![in &mut arena; 0u32; 10];
+assert_eq!(v.len(), 10);
+assert_eq!(v.as_slice(), &[0; 10]);
+```
+
+**With `finish()`:**
+
+```rust
+use fastarena::{Arena, arenavec};
+
+let mut arena = Arena::new();
+let slice = arenavec![in &mut arena; 1u32, 2, 3].finish();
+assert_eq!(slice, &mut [1, 2, 3]);
+```
+
+**Inside transactions:**
+
+```rust
+use fastarena::{Arena, arenavec};
+
+let mut arena = Arena::new();
+let mut txn = arena.transaction();
+{
+    let v = arenavec![in txn.arena_mut(); 10u32, 20, 30];
+    assert_eq!(v.as_slice(), &[10, 20, 30]);
+}
+txn.commit();
 ```
 
 ---

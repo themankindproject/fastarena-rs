@@ -35,3 +35,6 @@ pub use arena::ArenaStats;
 pub use arena::{Arena, Checkpoint};
 pub use util::{Transaction, TxnDiff, TxnStatus};
 pub use vec::{ArenaVec, ArenaVecIntoIter, TryReserveError};
+
+#[macro_use]
+mod macros;
