@@ -19,6 +19,8 @@ pub struct ArenaStats {
 
 impl ArenaStats {
     /// Fraction of reserved memory that is actively in use, in `[0.0, 1.0]`.
+    #[must_use]
+    #[allow(clippy::cast_precision_loss)]
     pub fn utilization(&self) -> f64 {
         if self.bytes_reserved == 0 {
             0.0
@@ -28,6 +30,7 @@ impl ArenaStats {
     }
 
     /// Bytes reserved but not currently allocated.
+    #[must_use]
     pub fn bytes_idle(&self) -> usize {
         self.bytes_reserved.saturating_sub(self.bytes_allocated)
     }

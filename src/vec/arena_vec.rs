@@ -143,6 +143,10 @@ impl<'arena, T> ArenaVec<'arena, T> {
     ///
     /// Returns `Ok(())` on success, `Err(val)` if the arena is out of memory.
     ///
+    /// # Errors
+    ///
+    /// Returns `Err(val)` if the arena cannot allocate additional capacity.
+    ///
     /// # Example
     ///
     /// ```rust
@@ -217,6 +221,10 @@ impl<'arena, T> ArenaVec<'arena, T> {
     ///
     /// Requires `ExactSizeIterator` to pre-compute capacity and avoid repeated
     /// reallocation during growth.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new length would overflow `usize` or the arena is out of memory.
     ///
     /// # Example
     ///
@@ -310,6 +318,7 @@ impl<'arena, T> ArenaVec<'arena, T> {
     /// assert_eq!(v.len(), 3);
     /// ```
     #[inline(always)]
+    #[must_use]
     pub fn len(&self) -> usize {
         self.len
     }
@@ -328,6 +337,7 @@ impl<'arena, T> ArenaVec<'arena, T> {
     /// assert!(!v.is_empty());
     /// ```
     #[inline(always)]
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
@@ -348,6 +358,7 @@ impl<'arena, T> ArenaVec<'arena, T> {
     /// assert_eq!(v.capacity(), 16);
     /// ```
     #[inline]
+    #[must_use]
     pub fn capacity(&self) -> usize {
         self.cap
     }
@@ -414,6 +425,12 @@ impl<'arena, T> ArenaVec<'arena, T> {
     ///
     /// Returns an error instead of panicking when the capacity overflows or the
     /// arena is out of memory.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CapacityOverflow`](TryReserveError::CapacityOverflow) if the
+    /// required capacity would overflow `usize`. Returns
+    /// [`AllocError`](TryReserveError::AllocError) if the arena is out of memory.
     ///
     /// # Example
     ///
@@ -500,6 +517,7 @@ impl<'arena, T> ArenaVec<'arena, T> {
     /// assert_eq!(v.as_slice(), &[10, 20, 30]);
     /// ```
     #[inline(always)]
+    #[must_use]
     pub fn as_slice(&self) -> &[T] {
         unsafe { core::slice::from_raw_parts(self.ptr.as_ptr() as *const T, self.len) }
     }
@@ -520,6 +538,7 @@ impl<'arena, T> ArenaVec<'arena, T> {
     /// assert_eq!(v.as_slice(), &[10, 20, 30]);
     /// ```
     #[inline(always)]
+    #[must_use]
     pub fn as_mut_slice(&mut self) -> &mut [T] {
         unsafe { core::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
     }
@@ -886,7 +905,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic = "out of bounds"]
     fn oob_panics() {
         let mut arena = Arena::new();
         let mut v = ArenaVec::new(&mut arena);

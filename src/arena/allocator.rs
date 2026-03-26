@@ -100,7 +100,6 @@ pub struct Arena {
     _drop_registry: (),
     pub(crate) cur_base: *mut u8,
     pub(crate) cur_ptr: *mut u8,
-    cur_end: *mut u8,
     /// Highest block index ever reached — used by `reset()` to iterate only
     /// the blocks that were actually touched, instead of all retained blocks.
     high_water_mark: usize,
@@ -122,6 +121,7 @@ impl Arena {
     /// let x = arena.alloc(42u64);
     /// assert_eq!(*x, 42);
     /// ```
+    #[must_use]
     pub fn new() -> Self {
         Self::with_capacity(DEFAULT_BLOCK_SIZE)
     }
@@ -140,11 +140,11 @@ impl Arena {
     /// let _ = arena.alloc(1u64);
     /// assert_eq!(arena.stats().bytes_reserved, 1024 * 1024);
     /// ```
+    #[must_use]
     pub fn with_capacity(initial_bytes: usize) -> Self {
         let size = initial_bytes.max(MIN_BLOCK_SIZE);
         let block = Block::new(size, MIN_BLOCK_ALIGN);
         let base = block.base;
-        let capacity = block.capacity;
         let mut blocks: InlineVec<Block, BLOCKS_INLINE_CAP> = InlineVec::new();
         blocks.push(block);
         Arena {
@@ -160,7 +160,6 @@ impl Arena {
             _drop_registry: (),
             cur_base: base,
             cur_ptr: base,
-            cur_end: unsafe { base.add(capacity) },
             high_water_mark: 0,
             largest_remaining: 0,
         }
@@ -210,7 +209,7 @@ impl Arena {
         }
         let ptr = self.alloc_raw_inner(mem::size_of::<T>(), mem::align_of::<T>());
         unsafe {
-            let typed = ptr.as_ptr() as *mut T;
+            let typed = ptr.as_ptr().cast::<T>();
             typed.write(val);
             #[cfg(feature = "drop-tracking")]
             self.drop_registry.register(typed);
@@ -229,6 +228,10 @@ impl Arena {
     /// let slice = arena.alloc_slice(0u32..5);
     /// assert_eq!(slice, &[0, 1, 2, 3, 4]);
     /// ```
+    /// # Panics
+    ///
+    /// Panics if the iterator's `ExactSizeIterator::len` lies and more elements
+    /// are produced than reported.
     #[inline]
     pub fn alloc_slice<T, I>(&mut self, iter: I) -> &mut [T]
     where
@@ -243,7 +246,7 @@ impl Arena {
         let total = mem::size_of::<T>().checked_mul(len).expect("overflow");
         let ptr = self.alloc_raw_inner(total, mem::align_of::<T>());
         unsafe {
-            let start = ptr.as_ptr() as *mut T;
+            let start = ptr.as_ptr().cast::<T>();
             Self::write_slice_bulk::<T, _>(start, &mut iter, len, total);
             #[cfg(feature = "drop-tracking")]
             self.drop_registry.register_slice(start, len);
@@ -253,6 +256,10 @@ impl Arena {
 
     /// Allocate a contiguous slice from a slice of `Copy` items using a single memcpy.
     /// Significantly faster than `alloc_slice` for small-to-medium `Copy` types.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the system is out of memory.
     ///
     /// # Example
     ///
@@ -273,7 +280,7 @@ impl Arena {
         let total = mem::size_of::<T>().checked_mul(len).expect("overflow");
         let ptr = self.alloc_raw_inner(total, mem::align_of::<T>());
         unsafe {
-            let dst = ptr.as_ptr() as *mut T;
+            let dst = ptr.as_ptr().cast::<T>();
             std::ptr::copy_nonoverlapping(src.as_ptr(), dst, len);
             #[cfg(feature = "drop-tracking")]
             self.drop_registry.register_slice(dst, len);
@@ -324,7 +331,7 @@ impl Arena {
             return unsafe { &mut *NonNull::dangling().as_ptr() };
         }
         let ptr = self.alloc_raw_inner(size, align);
-        unsafe { &mut *(ptr.as_ptr() as *mut MaybeUninit<T>) }
+        unsafe { &mut *ptr.as_ptr().cast::<MaybeUninit<T>>() }
     }
 
     /// Allocate `size` bytes with the given `align` alignment, initialized to zero.
@@ -419,7 +426,7 @@ impl Arena {
         }
         let ptr = self.try_alloc_raw_inner(mem::size_of::<T>(), mem::align_of::<T>())?;
         Some(unsafe {
-            let typed = ptr.as_ptr() as *mut T;
+            let typed = ptr.as_ptr().cast::<T>();
             typed.write(val);
             #[cfg(feature = "drop-tracking")]
             self.drop_registry.register(typed);
@@ -452,7 +459,7 @@ impl Arena {
         let total = mem::size_of::<T>().checked_mul(len)?;
         let ptr = self.try_alloc_raw_inner(total, mem::align_of::<T>())?;
         Some(unsafe {
-            let start = ptr.as_ptr() as *mut T;
+            let start = ptr.as_ptr().cast::<T>();
             Self::write_slice_bulk::<T, _>(start, &mut iter, len, total);
             #[cfg(feature = "drop-tracking")]
             self.drop_registry.register_slice(start, len);
@@ -487,6 +494,10 @@ impl Arena {
     }
 
     /// Fallible variant of [`alloc_raw`](Arena::alloc_raw).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `align` is not a power of two.
     ///
     /// # Example
     ///
@@ -527,7 +538,7 @@ impl Arena {
         let total = mem::size_of::<T>().checked_mul(len)?;
         let ptr = self.try_alloc_raw_inner(total, mem::align_of::<T>())?;
         unsafe {
-            let dst = ptr.as_ptr() as *mut T;
+            let dst = ptr.as_ptr().cast::<T>();
             std::ptr::copy_nonoverlapping(src.as_ptr(), dst, len);
             #[cfg(feature = "drop-tracking")]
             self.drop_registry.register_slice(dst, len);
@@ -536,6 +547,10 @@ impl Arena {
     }
 
     /// Fallible variant of [`alloc_zeroed`](Arena::alloc_zeroed).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `align` is not a power of two.
     ///
     /// # Example
     ///
@@ -656,7 +671,7 @@ impl Arena {
     /// No memory is freed — OS pages stay mapped and TLB-warm. If
     /// `drop-tracking` is enabled, all registered destructors run first.
     ///
-    /// Complexity is O(peak_blocks) — only blocks that were actually used
+    /// Complexity is O(`peak_blocks`) — only blocks that were actually used
     /// since the last reset are zeroed. Single-block arenas pay O(1).
     ///
     /// # Example
@@ -708,6 +723,10 @@ impl Arena {
     /// Execute a closure inside a transaction.
     ///
     /// `Ok` commits; `Err` rolls back all allocations before returning.
+    ///
+    /// # Errors
+    ///
+    /// Returns the closure's error value after rolling back all allocations.
     ///
     /// # Example
     ///
@@ -770,6 +789,7 @@ impl Arena {
     /// assert_eq!(arena.transaction_depth(), 0);
     /// ```
     #[inline]
+    #[must_use]
     pub fn transaction_depth(&self) -> usize {
         self.txn_depth
     }
@@ -832,6 +852,7 @@ impl Arena {
     /// assert!(arena.block_count() > 1);
     /// ```
     #[inline(always)]
+    #[must_use]
     pub fn block_count(&self) -> usize {
         self.blocks.len()
     }
@@ -855,7 +876,7 @@ impl Arena {
             // Stack scratch buffer → single bulk memcpy to destination.
             // Amortizes per-element iterator overhead for small Copy allocations.
             let mut buf = [0u8; 256];
-            let buf_ptr = buf.as_mut_ptr() as *mut T;
+            let buf_ptr = buf.as_mut_ptr().cast::<T>();
             for i in 0..len {
                 buf_ptr.add(i).write(iter.next().unwrap());
             }
@@ -1002,7 +1023,6 @@ impl Arena {
         }
         self.cur_base = block.base;
         self.cur_ptr = unsafe { block.base.add(block.offset) };
-        self.cur_end = unsafe { block.base.add(block.capacity) };
         self.largest_remaining = self.compute_largest_remaining(idx);
     }
 

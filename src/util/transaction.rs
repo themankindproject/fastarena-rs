@@ -164,6 +164,7 @@ impl<'arena> Transaction<'arena> {
     /// methods. It does **not** account for heap allocations inside values
     /// (e.g. `Vec` buffers) or allocations made through
     /// [`arena_mut`](Transaction::arena_mut).
+    #[must_use]
     pub fn budget_remaining(&self) -> Option<usize> {
         self.limit.map(|lim| lim.saturating_sub(self.bytes_used()))
     }
@@ -198,6 +199,7 @@ impl<'arena> Transaction<'arena> {
     /// block switch are tracked via the live pointer offset and included in the
     /// total.
     #[inline(always)]
+    #[must_use]
     pub fn bytes_used(&self) -> usize {
         let current_used = self.arena.cur_ptr as usize - self.arena.cur_base as usize;
         (self.arena.bytes_allocated + current_used).saturating_sub(self.bytes_at_open)
@@ -205,18 +207,21 @@ impl<'arena> Transaction<'arena> {
 
     /// Whether `commit()` has been called.
     #[inline(always)]
+    #[must_use]
     pub fn is_committed(&self) -> bool {
         self.committed
     }
 
     /// Nesting depth: `1` = top-level, `2` = first savepoint, etc.
     #[inline(always)]
+    #[must_use]
     pub fn depth(&self) -> usize {
         self.depth
     }
 
     /// Current nesting depth on the backing arena.
     #[inline(always)]
+    #[must_use]
     pub fn arena_depth(&self) -> usize {
         self.arena.txn_depth
     }

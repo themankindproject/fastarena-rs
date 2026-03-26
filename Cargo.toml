@@ -1,6 +1,6 @@
 [package]
 name         = "fastarena"
-version      = "0.1.2"
+version      = "0.1.3"
 edition      = "2021"
 authors      = ["Ashutosh Kumar <kumarashutosh34169@gmail.com>"]
 description  = "A zero-dependency, bump-pointer arena allocator with RAII transactions, nested savepoints, optional LIFO destructor tracking, and ArenaVec — built for compilers, storage engines, and high-throughput request-scoped workloads."

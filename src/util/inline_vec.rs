@@ -72,14 +72,14 @@ impl<T, const N: usize> InlineVec<T, N> {
 
     #[cold]
     fn push_slow(&mut self, val: T) {
-        if !self.on_heap {
-            self.promote_and_push(val);
-        } else {
+        if self.on_heap {
             if self.len == unsafe { (*self.data.heap).cap } {
                 self.heap_grow();
             }
             unsafe { (*self.data.heap).ptr.add(self.len).write(val) };
             self.len += 1;
+        } else {
+            self.promote_and_push(val);
         }
     }
 
@@ -91,10 +91,10 @@ impl<T, const N: usize> InlineVec<T, N> {
             return None;
         }
         self.len -= 1;
-        Some(if !self.on_heap {
-            unsafe { (*self.data.inline)[self.len].assume_init_read() }
-        } else {
+        Some(if self.on_heap {
             unsafe { (*self.data.heap).ptr.add(self.len).read() }
+        } else {
+            unsafe { (*self.data.inline)[self.len].assume_init_read() }
         })
     }
 
@@ -102,10 +102,10 @@ impl<T, const N: usize> InlineVec<T, N> {
     #[inline(always)]
     pub(crate) fn get(&self, i: usize) -> &T {
         debug_assert!(i < self.len);
-        if !self.on_heap {
-            unsafe { (*self.data.inline)[i].assume_init_ref() }
-        } else {
+        if self.on_heap {
             unsafe { &*(*self.data.heap).ptr.add(i) }
+        } else {
+            unsafe { (*self.data.inline)[i].assume_init_ref() }
         }
     }
 
@@ -113,34 +113,37 @@ impl<T, const N: usize> InlineVec<T, N> {
     #[inline(always)]
     pub(crate) fn get_mut(&mut self, i: usize) -> &mut T {
         debug_assert!(i < self.len);
-        if !self.on_heap {
-            unsafe { (*self.data.inline)[i].assume_init_mut() }
-        } else {
+        if self.on_heap {
             unsafe { &mut *(*self.data.heap).ptr.add(i) }
+        } else {
+            unsafe { (*self.data.inline)[i].assume_init_mut() }
         }
     }
 
     /// Returns a shared slice view of all elements.
     #[inline(always)]
     pub(crate) fn as_slice(&self) -> &[T] {
-        if !self.on_heap {
-            unsafe {
-                std::slice::from_raw_parts((*self.data.inline).as_ptr() as *const T, self.len)
-            }
+        if self.on_heap {
+            unsafe { std::slice::from_raw_parts((*self.data.heap).ptr.cast_const(), self.len) }
         } else {
-            unsafe { std::slice::from_raw_parts((*self.data.heap).ptr as *const T, self.len) }
+            unsafe {
+                std::slice::from_raw_parts((*self.data.inline).as_ptr().cast::<T>(), self.len)
+            }
         }
     }
 
     /// Returns a mutable slice view of all elements.
     #[inline(always)]
     pub(crate) fn as_mut_slice(&mut self) -> &mut [T] {
-        if !self.on_heap {
-            unsafe {
-                std::slice::from_raw_parts_mut((*self.data.inline).as_mut_ptr() as *mut T, self.len)
-            }
-        } else {
+        if self.on_heap {
             unsafe { std::slice::from_raw_parts_mut((*self.data.heap).ptr, self.len) }
+        } else {
+            unsafe {
+                std::slice::from_raw_parts_mut(
+                    (*self.data.inline).as_mut_ptr().cast::<T>(),
+                    self.len,
+                )
+            }
         }
     }
 
@@ -160,7 +163,7 @@ impl<T, const N: usize> InlineVec<T, N> {
     fn promote_and_push(&mut self, val: T) {
         let new_cap = N.checked_mul(2).expect("InlineVec: capacity overflow");
         let new_ptr = heap_alloc::<T>(new_cap);
-        unsafe { ptr::copy_nonoverlapping((*self.data.inline).as_ptr() as *const T, new_ptr, N) };
+        unsafe { ptr::copy_nonoverlapping((*self.data.inline).as_ptr().cast::<T>(), new_ptr, N) };
         self.data = Storage {
             heap: ManuallyDrop::new(HeapBuf {
                 ptr: new_ptr,
@@ -184,7 +187,7 @@ impl<T, const N: usize> InlineVec<T, N> {
         unsafe { ptr::copy_nonoverlapping(old_ptr, new_ptr, self.len) };
         let old_layout = Layout::array::<T>(old_cap).expect("InlineVec: layout overflow");
         if old_layout.size() > 0 {
-            unsafe { dealloc(old_ptr as *mut u8, old_layout) };
+            unsafe { dealloc(old_ptr.cast::<u8>(), old_layout) };
         }
         self.data = Storage {
             heap: ManuallyDrop::new(HeapBuf {
@@ -199,20 +202,20 @@ impl<T, const N: usize> std::ops::Index<usize> for InlineVec<T, N> {
     type Output = T;
     fn index(&self, i: usize) -> &T {
         assert!(i < self.len, "index {i} out of bounds (len={})", self.len);
-        if !self.on_heap {
-            unsafe { (*self.data.inline)[i].assume_init_ref() }
-        } else {
+        if self.on_heap {
             unsafe { &*(*self.data.heap).ptr.add(i) }
+        } else {
+            unsafe { (*self.data.inline)[i].assume_init_ref() }
         }
     }
 }
 impl<T, const N: usize> std::ops::IndexMut<usize> for InlineVec<T, N> {
     fn index_mut(&mut self, i: usize) -> &mut T {
         assert!(i < self.len, "index {i} out of bounds (len={})", self.len);
-        if !self.on_heap {
-            unsafe { (*self.data.inline)[i].assume_init_mut() }
-        } else {
+        if self.on_heap {
             unsafe { &mut *(*self.data.heap).ptr.add(i) }
+        } else {
+            unsafe { (*self.data.inline)[i].assume_init_mut() }
         }
     }
 }
@@ -234,19 +237,19 @@ impl<'a, T, const N: usize> IntoIterator for &'a mut InlineVec<T, N> {
 impl<T, const N: usize> Drop for InlineVec<T, N> {
     fn drop(&mut self) {
         if std::mem::needs_drop::<T>() {
-            if !self.on_heap {
+            if self.on_heap {
                 for i in 0..self.len {
-                    unsafe { (*self.data.inline)[i].assume_init_drop() }
+                    unsafe { ptr::drop_in_place((*self.data.heap).ptr.add(i)) }
                 }
             } else {
                 for i in 0..self.len {
-                    unsafe { ptr::drop_in_place((*self.data.heap).ptr.add(i)) }
+                    unsafe { (*self.data.inline)[i].assume_init_drop() }
                 }
             }
         }
         if self.on_heap {
             let cap = unsafe { (*self.data.heap).cap };
-            let raw = unsafe { (*self.data.heap).ptr } as *mut u8;
+            let raw = unsafe { (*self.data.heap).ptr }.cast::<u8>();
             let layout = Layout::array::<T>(cap).expect("InlineVec: layout overflow on drop");
             if layout.size() > 0 {
                 unsafe { dealloc(raw, layout) };
@@ -267,10 +270,8 @@ fn heap_alloc<T>(cap: usize) -> *mut T {
         return std::ptr::NonNull::dangling().as_ptr();
     }
     let raw = unsafe { alloc(layout) };
-    if raw.is_null() {
-        panic!("InlineVec: out of memory")
-    }
-    raw as *mut T
+    assert!(!raw.is_null(), "InlineVec: out of memory");
+    raw.cast::<T>()
 }
 
 #[cfg(test)]
@@ -389,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic = "out of bounds"]
     fn oob_panics() {
         let mut v: InlineVec<u32, 4> = InlineVec::new();
         v.push(1);

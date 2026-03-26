@@ -147,7 +147,7 @@ By default, fastarena never runs destructors (zero overhead). Enable `drop-track
 
 ```toml
 [dependencies]
-fastarena = { version = "0.1.2", features = ["drop-tracking"] }
+fastarena = { version = "0.1.3", features = ["drop-tracking"] }
 ```
 
 ```rust
@@ -223,7 +223,7 @@ See [USAGE.md](USAGE.md) for full examples.
 
 ```toml
 [dependencies]
-fastarena = { version = "0.1.2", features = ["drop-tracking"] }
+fastarena = { version = "0.1.3", features = ["drop-tracking"] }
 ```
 
 | Flag | Default | Description |

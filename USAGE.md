@@ -22,6 +22,10 @@
   - [ArenaVec](#arenavec)
   - [ArenaStats](#arenastats)
   - [Checkpoint](#checkpoint)
+  - [TxnStatus](#txnstatus)
+  - [TxnDiff](#txndiff)
+  - [TryReserveError](#tryreserveerror)
+  - [ArenaVecIntoIter](#arenavecintoiter)
 - [Performance](#performance)
 - [Best Practices](#best-practices)
 - [Feature Flags](#feature-flags)
@@ -56,14 +60,14 @@
 
 ```toml
 [dependencies]
-fastarena = "0.1.2"
+fastarena = "0.1.3"
 ```
 
 With destructor tracking:
 
 ```toml
 [dependencies]
-fastarena = { version = "0.1.2", features = ["drop-tracking"] }
+fastarena = { version = "0.1.3", features = ["drop-tracking"] }
 ```
 
 ---
@@ -209,7 +213,7 @@ By default, fastarena never runs destructors (zero overhead). Enable `drop-track
 
 ```toml
 [dependencies]
-fastarena = { version = "0.1.2", features = ["drop-tracking"] }
+fastarena = { version = "0.1.3", features = ["drop-tracking"] }
 ```
 
 ```rust
@@ -441,6 +445,8 @@ An append-only growable vector backed by arena memory.
 | `clear` | `fn clear(&mut self)` | Clear, keep capacity |
 | `extend_exact` | `fn extend_exact<I>(&mut self, iter: I)` | Batch from `ExactSizeIterator` |
 | `extend_from_slice` | `fn extend_from_slice(&mut self, slice: &[T]) where T: Copy` | Single `memcpy` |
+| `truncate` | `fn truncate(&mut self, len: usize)` | Shorten, dropping excess |
+| `resize` | `fn resize(&mut self, new_len: usize, val: T) where T: Clone` | Grow or shrink |
 | `finish` | `fn finish(self) -> &'arena mut [T]` | Transfer to arena |
 
 #### Capacity
@@ -465,6 +471,19 @@ An append-only growable vector backed by arena memory.
 #### Trait Implementations
 
 `ArenaVec` implements `Index<usize>`, `IndexMut<usize>`, `Extend<T>`, `IntoIterator` (owned, `&`, `&mut`), and `ExactSizeIterator`.
+
+#### Truncate / Resize
+
+Shorten or grow the vector in-place:
+
+```rust
+let mut v = ArenaVec::new(&mut arena);
+v.extend_exact([1u32, 2, 3, 4, 5]);
+
+v.truncate(3);          // [1, 2, 3] — elements 4, 5 dropped
+v.resize(6, 0);         // [1, 2, 3, 0, 0, 0] — fills with clone
+v.resize(2, 0);         // [1, 2] — excess dropped
+```
 
 #### The `finish()` Semantic
 
@@ -603,6 +622,202 @@ Opaque snapshot of arena position. `Copy` — zero-cost to pass around.
 pub struct Checkpoint { /* opaque */ }
 ```
 
+Implements `Display` — prints `Checkpoint(block=N, offset=N, bytes=N)`.
+
+**Usage:**
+
+```rust
+use fastarena::Arena;
+
+let mut arena = Arena::new();
+let x = arena.alloc(10u64);
+
+let cp = arena.checkpoint();   // O(1) snapshot — copies 3 integers
+arena.alloc(20u64);
+arena.alloc(30u64);
+// arena now holds [10, 20, 30]
+
+arena.rewind(cp);              // 20 and 30 gone; blocks retained for reuse
+assert_eq!(*x, 10);           // pre-checkpoint data still valid
+
+// Checkpoint is Copy — pass it around freely
+let cp2 = arena.checkpoint();
+let cp3 = cp2;                 // no cost
+arena.alloc(40u64);
+arena.rewind(cp3);             // 40 gone
+
+// Print checkpoint info
+let cp = arena.checkpoint();
+println!("{cp}");              // e.g. "Checkpoint(block=0, offset=8, bytes=8)"
+```
+
+**Speculative work pattern:**
+
+```rust
+use fastarena::Arena;
+
+let mut arena = Arena::new();
+arena.alloc(1u64);
+
+let cp = arena.checkpoint();
+
+// Try some work — may fail
+let success = false;
+arena.alloc(2u64);
+arena.alloc(3u64);
+
+if !success {
+    arena.rewind(cp);  // undo speculative allocations, keep original
+}
+```
+
+---
+
+### TxnStatus
+
+Outcome of `Transaction::commit` or `Transaction::rollback`.
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TxnStatus {
+    Committed,
+    RolledBack,
+}
+```
+
+Implements `Display` — prints `"committed"` or `"rolled back"`.
+
+**Usage:**
+
+```rust
+use fastarena::{Arena, TxnStatus};
+
+let mut arena = Arena::new();
+
+let mut txn = arena.transaction();
+txn.alloc(42u32);
+let status = txn.commit();
+assert_eq!(status, TxnStatus::Committed);
+println!("{status}");  // "committed"
+
+// Rollback returns RolledBack
+let mut txn = arena.transaction();
+txn.alloc(1u32);
+let status = txn.rollback();
+assert_eq!(status, TxnStatus::RolledBack);
+println!("{status}");  // "rolled back"
+```
+
+---
+
+### TxnDiff
+
+Allocation metrics for a single transaction scope, returned by `Transaction::diff`.
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TxnDiff {
+    pub bytes_allocated: usize,  // bytes allocated since txn opened
+    pub blocks_touched: usize,   // blocks written to during txn
+}
+```
+
+Implements `Display` — prints `"N bytes in M block(s)"`.
+
+**Usage:**
+
+```rust
+use fastarena::Arena;
+
+let mut arena = Arena::new();
+let mut txn = arena.transaction();
+
+let diff = txn.diff();
+assert_eq!(diff.bytes_allocated, 0);
+assert_eq!(diff.blocks_touched, 0);
+
+txn.alloc(100u64);
+txn.alloc_slice(vec![0u8; 256]);
+
+let diff = txn.diff();
+assert!(diff.bytes_allocated > 0);
+assert_eq!(diff.blocks_touched, 1);
+println!("{diff}");  // e.g. "264 bytes in 1 block(s)"
+
+txn.commit();
+```
+
+---
+
+### TryReserveError
+
+Error returned by `ArenaVec::try_reserve` and `ArenaVec::try_reserve_exact`.
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TryReserveError {
+    CapacityOverflow,  // requested size exceeds usize::MAX
+    AllocError,        // arena is out of memory
+}
+```
+
+Implements `Display` and `std::error::Error`.
+
+**Usage:**
+
+```rust
+use fastarena::{Arena, ArenaVec, TryReserveError};
+
+let mut arena = Arena::with_capacity(64);
+let mut v = ArenaVec::new(&mut arena);
+
+match v.try_reserve_exact(usize::MAX) {
+    Ok(()) => unreachable!(),
+    Err(TryReserveError::CapacityOverflow) => println!("overflow"),
+    Err(TryReserveError::AllocError) => println!("oom"),
+}
+```
+
+---
+
+### ArenaVecIntoIter
+
+Owning iterator over an `ArenaVec`. Returned by `ArenaVec::into_iter()` (i.e. `for x in vec`). Drains elements front-to-back; drops remaining elements in LIFO order when the iterator is dropped.
+
+```rust
+pub struct ArenaVecIntoIter<'arena, T> { /* opaque */ }
+
+impl<T> Iterator for ArenaVecIntoIter<'_, T> { type Item = T; }
+impl<T> ExactSizeIterator for ArenaVecIntoIter<'_, T> {}
+```
+
+**Usage:**
+
+```rust
+use fastarena::{Arena, ArenaVec};
+
+let mut arena = Arena::new();
+let v: ArenaVec<u32> = {
+    let mut v = ArenaVec::new(&mut arena);
+    v.extend_exact([10, 20, 30, 40, 50]);
+    v
+};
+
+// for loop consumes the ArenaVec via IntoIterator
+let mut collected = Vec::new();
+for val in v {
+    collected.push(val);
+}
+assert_eq!(collected, vec![10, 20, 30, 40, 50]);
+
+// size_hint is exact
+let mut v2 = ArenaVec::new(&mut arena);
+v2.extend_exact([1, 2, 3]);
+let iter = v2.into_iter();
+assert_eq!(iter.size_hint(), (3, Some(3)));
+assert_eq!(iter.len(), 3);
+```
+
 ---
 
 ## Performance
@@ -722,10 +937,10 @@ txn.commit();
 
 ```toml
 # Default (zero-cost, no destructor calls)
-fastarena = "0.1.2"
+fastarena = "0.1.3"
 
 # With drop-tracking
-fastarena = { version = "0.1.2", features = ["drop-tracking"] }
+fastarena = { version = "0.1.3", features = ["drop-tracking"] }
 ```
 
 ---

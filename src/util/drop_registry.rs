@@ -50,10 +50,10 @@ impl DropRegistry {
     pub(crate) fn register<T>(&mut self, ptr: *mut T) {
         if std::mem::needs_drop::<T>() {
             unsafe fn drop_shim<T>(p: *mut u8) {
-                ptr::drop_in_place(p as *mut T);
+                ptr::drop_in_place(p.cast::<T>());
             }
             self.slots.push(DropSlot::Single {
-                ptr: ptr as *mut u8,
+                ptr: ptr.cast::<u8>(),
                 shim: drop_shim::<T>,
             });
         }
@@ -68,13 +68,13 @@ impl DropRegistry {
         }
         if std::mem::needs_drop::<T>() {
             unsafe fn drop_range_shim<T>(p: *mut u8, count: usize) {
-                let ptr = p as *mut T;
+                let ptr = p.cast::<T>();
                 for i in 0..count {
                     ptr::drop_in_place(ptr.add(i));
                 }
             }
             self.slots.push(DropSlot::Range {
-                ptr: ptr as *mut u8,
+                ptr: ptr.cast::<u8>(),
                 count,
                 shim: drop_range_shim::<T>,
             });
@@ -97,6 +97,7 @@ impl DropRegistry {
     }
 
     /// Run a single drop slot, catching any panic.
+    #[allow(clippy::needless_pass_by_value)]
     fn run_slot(slot: DropSlot) -> Result<(), ()> {
         match slot {
             DropSlot::Single { ptr, shim } => {
