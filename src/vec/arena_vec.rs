@@ -47,19 +47,6 @@ impl std::error::Error for TryReserveError {}
 /// - **`drop` without `finish()`** → element destructors run immediately. The
 ///   backing memory is not freed (the arena retains it).
 ///
-/// # Safety invariants
-///
-/// Unlike a direct `&'arena mut Arena` borrow, this uses interior mutability
-/// to allow multiple `ArenaVec` instances and other arena operations while
-/// a vector exists. The user must ensure:
-///
-/// 1. The `Arena` outlives the `ArenaVec`. If the arena is dropped while
-///    `ArenaVec` still exists, any subsequent call to `push()`, `reserve()`, etc.
-///    will cause undefined behavior.
-/// 2. The arena remains valid for the lifetime. Do not create an `ArenaVec`
-///    inside a scope where the arena will be reset or rewinded before the
-///    vector is finished or dropped.
-///
 /// # Example
 ///
 /// ```rust
@@ -74,11 +61,11 @@ impl std::error::Error for TryReserveError {}
 /// assert_eq!(slice, &[1, 2, 3]);
 /// ```
 pub struct ArenaVec<'arena, T> {
-    arena: *mut Arena,
+    arena: &'arena mut Arena,
     ptr: NonNull<T>,
     len: usize,
     cap: usize,
-    _marker: PhantomData<fn(&'arena mut Arena)>,
+    _marker: PhantomData<T>,
 }
 
 impl<'arena, T> ArenaVec<'arena, T> {
@@ -97,7 +84,7 @@ impl<'arena, T> ArenaVec<'arena, T> {
     /// ```
     pub fn new(arena: &'arena mut Arena) -> Self {
         ArenaVec {
-            arena: arena as *mut Arena,
+            arena,
             ptr: NonNull::dangling(),
             len: 0,
             cap: 0,
@@ -127,11 +114,6 @@ impl<'arena, T> ArenaVec<'arena, T> {
             v.cap = cap;
         }
         v
-    }
-
-    #[inline]
-    fn arena(&mut self) -> &mut Arena {
-        unsafe { &mut *self.arena }
     }
 
     /// Append `val`. Amortised O(1).
@@ -508,7 +490,7 @@ impl<'arena, T> ArenaVec<'arena, T> {
             .checked_mul(mem::size_of::<T>())
             .ok_or(TryReserveError::CapacityOverflow)?;
         let raw = self
-            .arena()
+            .arena
             .try_alloc_raw(bytes, mem::align_of::<T>())
             .ok_or(TryReserveError::AllocError)?;
         let new_ptr = raw.as_ptr() as *mut T;
@@ -686,7 +668,7 @@ impl<'arena, T> ArenaVec<'arena, T> {
         let bytes = new_cap
             .checked_mul(mem::size_of::<T>())
             .expect("ArenaVec: capacity overflow");
-        let raw = self.arena().alloc_raw(bytes, mem::align_of::<T>());
+        let raw = self.arena.alloc_raw(bytes, mem::align_of::<T>());
         let new_ptr = raw.as_ptr() as *mut T;
         if self.len > 0 {
             unsafe { ptr::copy_nonoverlapping(self.ptr.as_ptr(), new_ptr, self.len) };
@@ -940,54 +922,5 @@ mod tests {
         v.push(3);
         let collected: Vec<u32> = v.into_iter().collect();
         assert_eq!(collected, &[1, 2, 3]);
-    }
-
-    #[test]
-    fn multiple_arena_vecs() {
-        let mut arena = Arena::new();
-        let mut v1 = ArenaVec::new(&mut arena);
-        let mut v2 = ArenaVec::new(&mut arena);
-        v1.push(1);
-        v2.push(2);
-        assert_eq!(v1.as_slice(), &[1]);
-        assert_eq!(v2.as_slice(), &[2]);
-    }
-
-    #[test]
-    fn arena_checkpoint_while_vec_exists() {
-        let mut arena = Arena::new();
-        let mut v = ArenaVec::new(&mut arena);
-        v.push(1);
-        let cp = arena.checkpoint();
-        v.push(2);
-        arena.rewind(cp);
-        assert_eq!(v.as_slice(), &[1, 2]);
-    }
-
-    #[test]
-    fn arena_alloc_while_vec_exists() {
-        let mut arena = Arena::new();
-        let mut v = ArenaVec::new(&mut arena);
-        v.push(1);
-        let x = arena.alloc(100i32);
-        assert_eq!(*x, 100);
-        v.push(*x);
-        assert_eq!(v.as_slice(), &[1, 100]);
-    }
-
-    #[test]
-    fn multiple_vecs_with_arena_alloc() {
-        let mut arena = Arena::new();
-        let mut v1 = ArenaVec::new(&mut arena);
-        let mut v2 = ArenaVec::new(&mut arena);
-
-        let x = arena.alloc(42i32);
-        v1.push(*x);
-
-        let y = arena.alloc(99i32);
-        v2.push(*y);
-
-        assert_eq!(v1.as_slice(), &[42]);
-        assert_eq!(v2.as_slice(), &[99]);
     }
 }

@@ -435,38 +435,6 @@ An append-only growable vector backed by arena memory.
 | `new` | `fn new(arena: &'arena mut Arena) -> Self` | Empty vector |
 | `with_capacity` | `fn with_capacity(arena: &'arena mut Arena, cap: usize) -> Self` | Pre-allocated |
 
-#### Multiple Vectors & Arena Access
-
-`ArenaVec` uses interior mutability, allowing multiple vectors and arena operations while a vector exists:
-
-```rust
-use fastarena::{Arena, ArenaVec};
-
-let mut arena = Arena::new();
-
-// Multiple ArenaVec instances
-let mut v1 = ArenaVec::new(&mut arena);
-let mut v2 = ArenaVec::new(&mut arena);
-v1.push(1);
-v2.push(2);
-
-// Arena operations while vectors exist
-let cp = arena.checkpoint();
-let x = arena.alloc(100i32);
-arena.rewind(cp);
-
-// ArenaVec alongside arena allocations
-let mut v = ArenaVec::new(&mut arena);
-v.push(1);
-let y = arena.alloc(50i32);
-v.push(*y);
-assert_eq!(v.as_slice(), &[1, 50]);
-```
-
-> **Backward compatible:** The old single-vector pattern still works exactly as before. This is a strict superset — you can use either pattern.
-
-> **Safety:** The `Arena` must outlive the `ArenaVec`. If the arena is dropped while a vector still exists, subsequent operations will cause undefined behavior.
-
 #### Operations
 
 | Method | Signature | Description |
@@ -988,32 +956,6 @@ let mut arena = Arena::new();
 let x = arena.alloc(42);
 arena.reset();
 // x is now dangling — UB if used
-```
-
-### ArenaVec Safety Invariants
-
-`ArenaVec` uses interior mutability (raw pointer) to allow multiple vectors and arena access. Users must ensure:
-
-1. **The `Arena` outlives the `ArenaVec`**. If the arena is dropped while a vector still exists, any call to `push()`, `reserve()`, or other mutation will cause undefined behavior.
-
-2. **The arena remains valid for the lifetime**. Do not create an `ArenaVec` inside a scope where the arena will be reset or rewinded before the vector is finished or dropped.
-
-```rust
-// OK: arena lives longer than vector
-let mut arena = Arena::new();
-let slice = {
-    let mut v = ArenaVec::new(&mut arena);
-    v.push(1);
-    v.finish()
-};
-
-// NOT OK: arena dropped while vector exists
-{
-    let mut arena = Arena::new();
-    let mut v = ArenaVec::new(&mut arena);
-    v.push(1);
-    // arena dropped here — v is now unsafe to use
-}
 ```
 
 ### No Thread Safety

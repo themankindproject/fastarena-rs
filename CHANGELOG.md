@@ -7,18 +7,6 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Changed
-
-- **Breaking:** `ArenaVec` now uses interior mutability (raw pointer `*mut Arena` instead of `&'arena mut Arena`). This enables:
-  - Multiple `ArenaVec` instances from the same arena
-  - Calling `arena.checkpoint()`, `arena.rewind()`, `arena.alloc()` while an `ArenaVec` exists
-  - Using `ArenaVec<String>` alongside arena-allocated objects
-  - Users must ensure the `Arena` outlives the `ArenaVec` (documented safety invariant)
-
-### Added
-
-- `ArenaVec` safety invariant documentation explaining arena lifetime requirements
-
 ## [0.1.3] - 2026-03-26
 
 ### Added
