@@ -123,7 +123,7 @@ impl std::fmt::Display for Checkpoint {
 ///    // use x and y independently
 ///    ```
 ///
-/// 3. **Use [`ArenaVec`]** — for multiple items of the same type:
+/// 3. **Use [`crate::vec::ArenaVec`]** — for multiple items of the same type:
 ///    ```rust
 ///    use fastarena::{Arena, ArenaVec};
 ///
