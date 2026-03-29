@@ -5,7 +5,9 @@
 
 pub(crate) mod allocator;
 mod block;
+mod boxed;
 mod stats;
 
 pub use allocator::{Arena, Checkpoint};
+pub use boxed::ArenaBox;
 pub use stats::ArenaStats;

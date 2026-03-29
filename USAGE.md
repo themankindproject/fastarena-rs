@@ -18,6 +18,7 @@
   - [Drop-Tracking](#drop-tracking--opt-in-destructor-execution)
 - [API Reference](#api-reference)
   - [Arena](#arena)
+  - [ArenaBox](#arenabox)
   - [Transaction](#transaction)
   - [ArenaVec](#arenavec)
   - [ArenaStats](#arenastats)
@@ -146,6 +147,51 @@ outer.alloc_str("confirmed");
 outer.commit();  // "top-level" + "confirmed" survive
 ```
 
+### Multiple Allocations and the Borrow Checker
+
+All `alloc*` methods return `&mut T`. This prevents making multiple allocations simultaneously because the borrow checker sees the arena as mutably borrowed:
+
+```ignore
+// This does NOT compile:
+let mut arena = Arena::new();
+let x = arena.alloc(1i32);  // &mut i32
+let y = arena.alloc(2i32);  // ERROR: cannot borrow arena as mutable more than once
+```
+
+**Workarounds:**
+
+1. **Immediate consumption** — transform the value before allocating another:
+   ```rust
+   let mut arena = Arena::new();
+   let x = arena.alloc(1i32);
+   let sum = *x + 10;  // consume x
+   let y = arena.alloc(sum);
+   ```
+
+2. **Store as raw pointer** — convert the reference to a raw pointer after allocation:
+   ```rust
+   let mut arena = Arena::new();
+   let x: *mut i32 = arena.alloc(1i32) as *mut _;
+   let y = arena.alloc(2i32);
+   ```
+
+3. **Use `ArenaVec`** — for multiple items of the same type:
+   ```rust
+   let mut arena = Arena::new();
+   let mut vec = ArenaVec::new(&mut arena);
+   vec.push(1);
+   vec.push(2);
+   let slice = vec.finish();  // &mut [i32]
+   ```
+
+4. **Use `ArenaBox<T>`** — for owned allocation with drop semantics:
+   ```rust
+   let mut arena = Arena::new();
+   let x = arena.alloc_box(1i32);
+   // x has ownership semantics - can be moved or dropped
+   assert_eq!(*x, 1);
+   ```
+
 ### ArenaVec with `finish()` — Transfer Ownership to the Arena
 
 `ArenaVec` is a growable vector backed by arena memory. Call `finish()` to hand ownership to the arena — no destructor run, no copy. The slice lives as long as the arena.
@@ -255,6 +301,7 @@ let arena = Arena::with_capacity(1024 * 1024); // 1 MiB initial
 | Method | Signature | Description |
 |--------|-----------|-------------|
 | `alloc` | `fn alloc<T>(&mut self, val: T) -> &mut T` | O(1) single value |
+| `alloc_box` | `fn alloc_box<T>(&mut self, val: T) -> ArenaBox<'_, T>` | Owned allocation (`Box`-like) |
 | `alloc_slice` | `fn alloc_slice<T, I>(&mut self, iter: I) -> &mut [T]` | From `ExactSizeIterator` |
 | `alloc_slice_copy` | `fn alloc_slice_copy<T: Copy>(&mut self, src: &[T]) -> &mut [T]` | Single `memcpy` for `Copy` types |
 | `alloc_str` | `fn alloc_str(&mut self, s: &str) -> &str` | Copy string into arena |
@@ -337,6 +384,49 @@ arena.reset();                 // fast, warm pages, no OS calls
 |--------|-----------|------------|
 | `stats` | `fn stats(&self) -> ArenaStats` | O(1) |
 | `block_count` | `fn block_count(&self) -> usize` | O(1) |
+
+---
+
+### ArenaBox
+
+An owned allocation from an arena, similar to `Box<T>`. Unlike `Box<T>` which allocates on the heap, `ArenaBox<T>` stores its data within arena memory.
+
+#### Construction
+
+```rust
+let mut arena = Arena::new();
+let box = arena.alloc_box(42i32);
+```
+
+#### Methods
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `into_inner` | `fn into_inner(self) -> T` | Consume and extract the value |
+| `as_ptr` | `fn as_ptr(&self) -> *const T` | Raw pointer to the data |
+| `as_mut_ptr` | `fn as_mut_ptr(&mut self) -> *mut T` | Mutable raw pointer |
+
+#### Deref
+
+`ArenaBox` implements `Deref` and `DerefMut`, so you can use it like a regular reference:
+
+```rust
+let mut arena = Arena::new();
+let box = arena.alloc_box(42i32);
+
+assert_eq!(*box, 42);
+
+// Modify through mutable deref
+let mut box = box;
+*box = 100;
+assert_eq!(*box, 100);
+```
+
+#### Notes
+
+- The lifetime `'arena` ties the `ArenaBox` to the arena it was allocated from.
+- The arena must not be reset or rewound while any `ArenaBox` pointing to its memory is still in use.
+- `ArenaBox` does not run destructors when dropped. If you need destructors to run, enable the `drop-tracking` feature and use `Arena::reset()` or `Arena::rewind()`.
 
 ---
 

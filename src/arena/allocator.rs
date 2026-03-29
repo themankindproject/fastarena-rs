@@ -2,11 +2,13 @@ use std::mem::{self, MaybeUninit};
 use std::ptr::NonNull;
 
 use super::block::{align_up, Block, MIN_BLOCK_ALIGN};
+use super::boxed::ArenaBox;
 use super::stats::ArenaStats;
 use crate::util::{
     inline_vec::InlineVec,
     transaction::{run_with_transaction, run_with_transaction_infallible, Transaction},
 };
+use crate::vec::ArenaVec;
 
 #[cfg(feature = "drop-tracking")]
 use crate::util::drop_registry::DropRegistry;
@@ -87,6 +89,61 @@ impl std::fmt::Display for Checkpoint {
 ///     })
 /// }
 /// ```
+///
+/// # Multiple allocations and the borrow checker
+///
+/// All `alloc*` methods return `&mut T`. This prevents making multiple allocations
+/// simultaneously because the borrow checker sees the arena as mutably borrowed.
+/// The following code does NOT compile:
+///
+/// ```ignore
+/// let mut arena = Arena::new();
+/// let x = arena.alloc(1i32);  // &mut i32
+/// let y = arena.alloc(2i32);  // ERROR: cannot borrow arena as mutable more than once
+/// ```
+///
+/// **Workarounds:**
+///
+/// 1. **Immediate consumption** — transform the value before allocating another:
+///    ```rust
+///    use fastarena::Arena;
+///
+///    let mut arena = Arena::new();
+///    let x = arena.alloc(1i32);
+///    let sum = *x + 10;  // consume x
+///    let y = arena.alloc(sum);
+///    ```
+///
+/// 2. **Store as raw pointer** — convert the reference to a raw pointer after allocation:
+///    ```rust
+///    use fastarena::Arena;
+///
+///    let mut arena = Arena::new();
+///    let x: *mut i32 = arena.alloc(1i32) as *mut _;
+///    let y = arena.alloc(2i32);
+///    // use x and y independently
+///    ```
+///
+/// 3. **Use [`ArenaVec`]** — for multiple items of the same type:
+///    ```rust
+///    use fastarena::{Arena, ArenaVec};
+///
+///    let mut arena = Arena::new();
+///    let mut vec = ArenaVec::new(&mut arena);
+///    vec.push(1);
+///    vec.push(2);
+///    let slice = vec.finish();  // &mut [i32]
+///    ```
+///
+/// 4. **Use [`ArenaBox<T>`]** — for owned allocation with drop semantics:
+///    ```rust
+///    use fastarena::{Arena, ArenaBox};
+///
+///    let mut arena = Arena::new();
+///    let x = arena.alloc_box(1i32);
+///    // x has ownership semantics - can be moved or dropped
+///    assert_eq!(*x, 1);
+///    ```
 pub struct Arena {
     blocks: InlineVec<Block, BLOCKS_INLINE_CAP>,
     pub(crate) current: usize,
@@ -332,6 +389,18 @@ impl Arena {
         }
         let ptr = self.alloc_raw_inner(size, align);
         unsafe { &mut *ptr.as_ptr().cast::<MaybeUninit<T>>() }
+    }
+
+    /// Allocate an owned value `T` from the arena, returning an [`ArenaBox`].
+    ///
+    /// Unlike `alloc()` which returns `&mut T`, `alloc_box()` returns `ArenaBox<T>`.
+    /// This provides ownership semantics, but note that the arena still uses interior
+    /// mutability internally.
+    ///
+    /// Note: The arena must not be reset or rewound while any `ArenaBox` is still in use.
+    #[inline]
+    pub fn alloc_box<T>(&mut self, val: T) -> ArenaBox<'_, T> {
+        ArenaBox::new(self, val)
     }
 
     /// Allocate `size` bytes with the given `align` alignment, initialized to zero.

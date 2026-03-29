@@ -7,6 +7,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `ArenaBox<T>` — an owned allocation type similar to `Box<T>` but backed by arena memory. Provides ownership semantics without heap allocation.
+- `Arena::alloc_box<T>(&mut self, val: T) -> ArenaBox<'_, T>` — allocates an owned value from the arena.
+- Documentation in `Arena` struct explaining the borrow checker limitation with `alloc*` methods and four workarounds (immediate consumption, raw pointers, ArenaVec, ArenaBox).
+
+### Changed
+
+- Updated documentation to include `ArenaBox` in the feature comparison table.
+
 ## [0.1.3] - 2026-03-26
 
 ### Added

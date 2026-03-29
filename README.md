@@ -18,6 +18,7 @@ A zero-dependency bump-pointer arena allocator with RAII transactions, nested sa
 | **Transactions** | RAII guard with commit/rollback, nested savepoints |
 | **Drop-tracking** | Opt-in destructor execution — zero-cost when off |
 | **Budget enforcement** | Cap bytes per transaction for request-scoped safety |
+| **ArenaBox** | Owned allocation type (`Box`-like) for ownership without heap |
 
 ## Quick Start
 
@@ -91,6 +92,19 @@ outer.alloc_str("top-level");
 
 outer.alloc_str("confirmed");
 outer.commit();  // "top-level" + "confirmed" survive
+```
+
+### Multiple Allocations and the Borrow Checker
+
+All `alloc*` methods return `&mut T`. This prevents making multiple allocations simultaneously because the borrow checker sees the arena as mutably borrowed. Workarounds include immediate consumption, raw pointers, `ArenaVec`, and the new `ArenaBox<T>` type:
+
+```rust
+use fastarena::{Arena, ArenaBox};
+
+let mut arena = Arena::new();
+let x = arena.alloc_box(1i32);
+// x has ownership semantics - can be moved or dropped
+assert_eq!(*x, 1);
 ```
 
 ### ArenaVec with `finish()` — Transfer Ownership to the Arena
