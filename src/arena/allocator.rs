@@ -8,7 +8,6 @@ use crate::util::{
     inline_vec::InlineVec,
     transaction::{run_with_transaction, run_with_transaction_infallible, Transaction},
 };
-use crate::vec::ArenaVec;
 
 #[cfg(feature = "drop-tracking")]
 use crate::util::drop_registry::DropRegistry;
