@@ -488,6 +488,7 @@ impl Arena {
     /// assert_eq!(*x.unwrap(), 42);
     /// ```
     #[inline]
+    #[must_use]
     pub fn try_alloc<T>(&mut self, val: T) -> Option<&mut T> {
         if mem::size_of::<T>() == 0 {
             return Some(unsafe { &mut *NonNull::dangling().as_ptr() });
@@ -514,6 +515,7 @@ impl Arena {
     /// assert_eq!(s.unwrap(), &[0, 1, 2, 3]);
     /// ```
     #[inline]
+    #[must_use]
     pub fn try_alloc_slice<T, I>(&mut self, iter: I) -> Option<&mut [T]>
     where
         I: IntoIterator<Item = T>,
@@ -547,6 +549,7 @@ impl Arena {
     /// assert_eq!(s, Some("hello"));
     /// ```
     #[inline]
+    #[must_use]
     pub fn try_alloc_str(&mut self, s: &str) -> Option<&str> {
         if s.is_empty() {
             return Some("");
@@ -578,6 +581,7 @@ impl Arena {
     /// assert_eq!(ptr.unwrap().as_ptr() as usize % 64, 0);
     /// ```
     #[inline]
+    #[must_use]
     pub fn try_alloc_raw(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
         assert!(align.is_power_of_two(), "align must be a power of two");
         if size == 0 {
@@ -598,6 +602,7 @@ impl Arena {
     /// assert_eq!(s.unwrap(), &[10, 20, 30]);
     /// ```
     #[inline]
+    #[must_use]
     pub fn try_alloc_slice_copy<T: Copy>(&mut self, src: &[T]) -> Option<&mut [T]> {
         let len = src.len();
         if len == 0 {
@@ -632,6 +637,7 @@ impl Arena {
     /// assert!(buf.iter().all(|&b| b == 0));
     /// ```
     #[inline]
+    #[must_use]
     pub fn try_alloc_zeroed(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
         assert!(align.is_power_of_two(), "align must be a power of two");
         if size == 0 {
@@ -655,6 +661,7 @@ impl Arena {
     /// assert_eq!(ptr.unwrap().as_ptr() as usize % 64, 0);
     /// ```
     #[inline]
+    #[must_use]
     pub fn try_alloc_cache_aligned(&mut self, size: usize) -> Option<NonNull<u8>> {
         self.try_alloc_raw(size, CACHE_LINE_SIZE)
     }

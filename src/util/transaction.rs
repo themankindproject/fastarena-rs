@@ -360,6 +360,7 @@ impl<'arena> Transaction<'arena> {
     ///
     /// See [`Arena::try_alloc`] for details.
     #[inline]
+    #[must_use]
     pub fn try_alloc<T>(&mut self, val: T) -> Option<&mut T> {
         if !self.budget_ok(mem::size_of::<T>()) {
             return None;
@@ -371,6 +372,7 @@ impl<'arena> Transaction<'arena> {
     ///
     /// See [`Arena::try_alloc_slice`] for details.
     #[inline]
+    #[must_use]
     pub fn try_alloc_slice<T, I>(&mut self, iter: I) -> Option<&mut [T]>
     where
         I: IntoIterator<Item = T>,
@@ -388,6 +390,7 @@ impl<'arena> Transaction<'arena> {
     ///
     /// See [`Arena::try_alloc_str`] for details.
     #[inline]
+    #[must_use]
     pub fn try_alloc_str(&mut self, s: &str) -> Option<&str> {
         if !self.budget_ok(s.len()) {
             return None;
@@ -399,6 +402,7 @@ impl<'arena> Transaction<'arena> {
     ///
     /// See [`Arena::try_alloc_raw`] for details.
     #[inline]
+    #[must_use]
     pub fn try_alloc_raw(&mut self, size: usize, align: usize) -> Option<NonNull<u8>> {
         if !self.budget_ok(size) {
             return None;
@@ -410,6 +414,7 @@ impl<'arena> Transaction<'arena> {
     ///
     /// See [`Arena::alloc_slice_copy`] for details.
     #[inline]
+    #[must_use]
     pub fn try_alloc_slice_copy<T: Copy>(&mut self, src: &[T]) -> Option<&mut [T]> {
         let total = mem::size_of::<T>().saturating_mul(src.len());
         if !self.budget_ok(total) {
@@ -422,6 +427,7 @@ impl<'arena> Transaction<'arena> {
     ///
     /// See [`Arena::alloc_cache_aligned`] for details.
     #[inline]
+    #[must_use]
     pub fn try_alloc_cache_aligned(&mut self, size: usize) -> Option<NonNull<u8>> {
         if !self.budget_ok(size) {
             return None;
