@@ -1002,10 +1002,11 @@ impl Arena {
             return self.alloc_slow(size, align);
         }
         let offset = self.cur_ptr.align_offset(align);
-        let aligned_ptr = unsafe { self.cur_ptr.add(offset) };
-        let new_ptr = unsafe { aligned_ptr.add(size) };
+        // Use wrapping to check bounds without UB
+        let new_ptr = self.cur_ptr.wrapping_add(offset).wrapping_add(size);
         if new_ptr <= self.cur_end {
-            self.cur_ptr = new_ptr;
+            let aligned_ptr = unsafe { self.cur_ptr.add(offset) };
+            self.cur_ptr = unsafe { aligned_ptr.add(size) };
             return unsafe { NonNull::new_unchecked(aligned_ptr) };
         }
         self.alloc_slow(size, align)
@@ -1019,10 +1020,11 @@ impl Arena {
             return self.alloc_slow_try(size, align);
         }
         let offset = self.cur_ptr.align_offset(align);
-        let aligned_ptr = unsafe { self.cur_ptr.add(offset) };
-        let new_ptr = unsafe { aligned_ptr.add(size) };
+        // Use wrapping to check bounds without UB
+        let new_ptr = self.cur_ptr.wrapping_add(offset).wrapping_add(size);
         if new_ptr <= self.cur_end {
-            self.cur_ptr = new_ptr;
+            let aligned_ptr = unsafe { self.cur_ptr.add(offset) };
+            self.cur_ptr = unsafe { aligned_ptr.add(size) };
             return Some(unsafe { NonNull::new_unchecked(aligned_ptr) });
         }
         self.alloc_slow_try(size, align)
