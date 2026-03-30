@@ -1,7 +1,7 @@
 use std::mem::{self, MaybeUninit};
 use std::ptr::NonNull;
 
-use super::block::{align_up, Block, MIN_BLOCK_ALIGN};
+use super::block::{Block, MIN_BLOCK_ALIGN};
 use super::boxed::ArenaBox;
 use super::stats::ArenaStats;
 use crate::util::{
@@ -1001,12 +1001,12 @@ impl Arena {
         if align > MIN_BLOCK_ALIGN {
             return self.alloc_slow(size, align);
         }
-        let ptr_val = self.cur_ptr as usize;
-        let aligned = align_up(ptr_val, align);
-        let new_ptr = aligned.wrapping_add(size);
-        if new_ptr <= self.cur_end as usize {
-            self.cur_ptr = new_ptr as *mut u8;
-            return unsafe { NonNull::new_unchecked(aligned as *mut u8) };
+        let offset = self.cur_ptr.align_offset(align);
+        let aligned_ptr = unsafe { self.cur_ptr.add(offset) };
+        let new_ptr = unsafe { aligned_ptr.add(size) };
+        if new_ptr <= self.cur_end {
+            self.cur_ptr = new_ptr;
+            return unsafe { NonNull::new_unchecked(aligned_ptr) };
         }
         self.alloc_slow(size, align)
     }
@@ -1018,12 +1018,12 @@ impl Arena {
         if align > MIN_BLOCK_ALIGN {
             return self.alloc_slow_try(size, align);
         }
-        let ptr_val = self.cur_ptr as usize;
-        let aligned = align_up(ptr_val, align);
-        let new_ptr = aligned.checked_add(size)?;
-        if new_ptr <= self.cur_end as usize {
-            self.cur_ptr = new_ptr as *mut u8;
-            return Some(unsafe { NonNull::new_unchecked(aligned as *mut u8) });
+        let offset = self.cur_ptr.align_offset(align);
+        let aligned_ptr = unsafe { self.cur_ptr.add(offset) };
+        let new_ptr = unsafe { aligned_ptr.add(size) };
+        if new_ptr <= self.cur_end {
+            self.cur_ptr = new_ptr;
+            return Some(unsafe { NonNull::new_unchecked(aligned_ptr) });
         }
         self.alloc_slow_try(size, align)
     }
