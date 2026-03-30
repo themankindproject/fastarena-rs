@@ -744,10 +744,10 @@ impl Arena {
             self.blocks.len()
         );
         debug_assert!(
-            cp.offset <= self.blocks[cp.block_idx].capacity,
+            cp.offset <= self.blocks.get(cp.block_idx).capacity,
             "rewind: checkpoint offset {} exceeds block capacity {}",
             cp.offset,
-            self.blocks[cp.block_idx].capacity
+            self.blocks.get(cp.block_idx).capacity
         );
 
         #[cfg(feature = "drop-tracking")]
@@ -973,30 +973,17 @@ impl Arena {
 impl Arena {
     /// Write elements from an iterator into an arena-allocated buffer.
     ///
-    /// For `Copy` types with small total size (≤256 bytes), collects into a
-    /// stack scratch buffer then bulk-copies via `copy_nonoverlapping`,
-    /// amortizing per-element iterator protocol overhead. For non-`Copy` types
-    /// or larger allocations, writes directly in place.
+    /// Writes directly to destination. For Copy types with bulk data,
+    /// use alloc_slice_copy (single memcpy) instead.
     #[inline(always)]
     unsafe fn write_slice_bulk<T, I: Iterator<Item = T>>(
         dst: *mut T,
         iter: &mut I,
         len: usize,
-        total_bytes: usize,
+        _total_bytes: usize,
     ) {
-        if !mem::needs_drop::<T>() && mem::size_of::<T>() > 0 && total_bytes <= 256 {
-            // Stack scratch buffer → single bulk memcpy to destination.
-            // Amortizes per-element iterator overhead for small Copy allocations.
-            let mut buf = [0u8; 256];
-            let buf_ptr = buf.as_mut_ptr().cast::<T>();
-            for i in 0..len {
-                buf_ptr.add(i).write(iter.next().unwrap());
-            }
-            std::ptr::copy_nonoverlapping(buf_ptr, dst, len);
-        } else {
-            for i in 0..len {
-                dst.add(i).write(iter.next().unwrap());
-            }
+        for i in 0..len {
+            dst.add(i).write(iter.next().unwrap());
         }
     }
 
