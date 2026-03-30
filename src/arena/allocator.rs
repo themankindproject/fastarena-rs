@@ -166,6 +166,9 @@ pub struct Arena {
     /// Used by `alloc_slow` to skip the block scan entirely when no retained
     /// block can satisfy the request. Updated lazily on block transitions.
     largest_remaining: usize,
+    /// Index of the block with the largest remaining space (post-current).
+    /// Used for incremental updates instead of scanning all blocks.
+    largest_remaining_idx: usize,
 }
 
 impl Arena {
@@ -222,6 +225,7 @@ impl Arena {
             cur_end: unsafe { base.add(size) },
             high_water_mark: 0,
             largest_remaining: 0,
+            largest_remaining_idx: 0,
         }
     }
 }
@@ -795,14 +799,18 @@ impl Arena {
         // largest_remaining = max capacity among retained blocks (compute once)
         self.largest_remaining = if self.blocks.len() > 1 {
             let mut max_rem = 0;
+            let mut max_idx = 0;
             for i in 1..self.blocks.len() {
                 let cap = self.blocks.get(i).capacity;
                 if cap > max_rem {
                     max_rem = cap;
+                    max_idx = i;
                 }
             }
+            self.largest_remaining_idx = max_idx;
             max_rem
         } else {
+            self.largest_remaining_idx = 0;
             0
         };
     }
@@ -1124,7 +1132,17 @@ impl Arena {
         self.cur_base = block.base;
         self.cur_ptr = unsafe { block.base.add(block.offset) };
         self.cur_end = unsafe { block.base.add(block.capacity) };
-        self.largest_remaining = self.compute_largest_remaining(idx);
+
+        // Incremental update: if previous largest block is still valid, keep it
+        let start = idx + 1;
+        if self.largest_remaining_idx >= start {
+            // Previous largest is still valid, just update its remaining
+            let blk = self.blocks.get(self.largest_remaining_idx);
+            self.largest_remaining = blk.capacity - blk.offset;
+        } else {
+            // Need to scan from start
+            self.largest_remaining = self.compute_largest_remaining(idx);
+        }
     }
 
     /// Computes the size of the next block, growing 1.5× up to `MAX_BLOCK_SIZE`.
@@ -1148,15 +1166,19 @@ impl Arena {
     }
 
     /// Computes the maximum contiguous free space in blocks after `from_idx`.
+    /// Also updates largest_remaining_idx.
     #[inline]
-    fn compute_largest_remaining(&self, from_idx: usize) -> usize {
+    fn compute_largest_remaining(&mut self, from_idx: usize) -> usize {
         let mut max_rem = 0;
+        let mut max_idx = from_idx;
         for i in (from_idx + 1)..self.blocks.len() {
             let rem = self.blocks.get(i).capacity - self.blocks.get(i).offset;
             if rem > max_rem {
                 max_rem = rem;
+                max_idx = i;
             }
         }
+        self.largest_remaining_idx = max_idx;
         max_rem
     }
 }
