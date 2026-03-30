@@ -1003,12 +1003,10 @@ impl Arena {
         }
         let ptr_val = self.cur_ptr as usize;
         let aligned = align_up(ptr_val, align);
-        let align_offset = aligned - ptr_val;
-        let new_ptr_val = aligned + size;
-        if new_ptr_val <= self.cur_end as usize {
-            let result = unsafe { self.cur_ptr.add(align_offset) };
-            self.cur_ptr = unsafe { self.cur_ptr.add(align_offset + size) };
-            return unsafe { NonNull::new_unchecked(result) };
+        let new_ptr = aligned.wrapping_add(size);
+        if new_ptr <= self.cur_end as usize {
+            self.cur_ptr = new_ptr as *mut u8;
+            return unsafe { NonNull::new_unchecked(aligned as *mut u8) };
         }
         self.alloc_slow(size, align)
     }
@@ -1022,12 +1020,10 @@ impl Arena {
         }
         let ptr_val = self.cur_ptr as usize;
         let aligned = align_up(ptr_val, align);
-        let align_offset = aligned - ptr_val;
-        let new_ptr_val = aligned.checked_add(size)?;
-        if new_ptr_val <= self.cur_end as usize {
-            let result = unsafe { self.cur_ptr.add(align_offset) };
-            self.cur_ptr = unsafe { self.cur_ptr.add(align_offset + size) };
-            return Some(unsafe { NonNull::new_unchecked(result) });
+        let new_ptr = aligned.checked_add(size)?;
+        if new_ptr <= self.cur_end as usize {
+            self.cur_ptr = new_ptr as *mut u8;
+            return Some(unsafe { NonNull::new_unchecked(aligned as *mut u8) });
         }
         self.alloc_slow_try(size, align)
     }

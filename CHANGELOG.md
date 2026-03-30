@@ -7,6 +7,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Performance
+
+- **`alloc` speedup ~51%** — Cached `cur_end` pointer eliminates per-allocation bounds check and 2 pointer operations (block array access). Benchmark: 1.8µs → 875ns for 1000 u64 allocations.
+- **`alloc_str` fast path** — Dedicated fast path for align=1 case, avoiding alignment computation.
+- **`write_slice_bulk` simplification** — Removed 256-byte stack buffer, writes directly to destination.
+- **`largest_remaining` tracking** — Incremental tracking to avoid full block scan on each block transition.
+
 ### Added
 
 - `ArenaBox<T>` — an owned allocation type similar to `Box<T>` but backed by arena memory. Provides ownership semantics without heap allocation.
@@ -16,6 +23,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - Updated documentation to include `ArenaBox` in the feature comparison table.
+
+### Fixed
+
+- **Miri strict provenance** — Integer-to-pointer casts replaced with pointer arithmetic (`ptr.add(offset)`) in `Arena::alloc` and `ArenaVec::reserve`/`grow` to comply with Miri's strict provenance rules.
 
 ## [0.1.3] - 2026-03-26
 
