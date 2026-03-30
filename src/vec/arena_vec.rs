@@ -486,8 +486,24 @@ impl<'arena, T> ArenaVec<'arena, T> {
             self.cap = new_cap;
             return Ok(());
         }
+        let elem_size = mem::size_of::<T>();
+
+        // In-place extension: if our tail == arena's cur_ptr, just bump forward.
+        if self.cap > 0 {
+            let our_end = (self.ptr.as_ptr() as usize) + self.cap * elem_size;
+            if our_end == self.arena.cur_ptr as usize && new_cap > self.cap {
+                let extra_bytes = (new_cap - self.cap) * elem_size;
+                let new_end = our_end + extra_bytes;
+                if new_end <= self.arena.cur_end as usize {
+                    self.arena.cur_ptr = new_end as *mut u8;
+                    self.cap = new_cap;
+                    return Ok(());
+                }
+            }
+        }
+
         let bytes = new_cap
-            .checked_mul(mem::size_of::<T>())
+            .checked_mul(elem_size)
             .ok_or(TryReserveError::CapacityOverflow)?;
         let raw = self
             .arena
@@ -665,8 +681,24 @@ impl<'arena, T> ArenaVec<'arena, T> {
             self.cap = new_cap;
             return;
         }
+        let elem_size = mem::size_of::<T>();
+
+        // In-place extension: if our tail == arena's cur_ptr, just bump forward.
+        if self.cap > 0 {
+            let our_end = (self.ptr.as_ptr() as usize) + self.cap * elem_size;
+            if our_end == self.arena.cur_ptr as usize && new_cap > self.cap {
+                let extra_bytes = (new_cap - self.cap) * elem_size;
+                let new_end = our_end + extra_bytes;
+                if new_end <= self.arena.cur_end as usize {
+                    self.arena.cur_ptr = new_end as *mut u8;
+                    self.cap = new_cap;
+                    return;
+                }
+            }
+        }
+
         let bytes = new_cap
-            .checked_mul(mem::size_of::<T>())
+            .checked_mul(elem_size)
             .expect("ArenaVec: capacity overflow");
         let raw = self.arena.alloc_raw(bytes, mem::align_of::<T>());
         let new_ptr = raw.as_ptr() as *mut T;

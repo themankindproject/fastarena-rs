@@ -156,6 +156,9 @@ pub struct Arena {
     _drop_registry: (),
     pub(crate) cur_base: *mut u8,
     pub(crate) cur_ptr: *mut u8,
+    /// End pointer of the current block (= cur_base + capacity). Cached to
+    /// eliminate block array access on every fast-path allocation.
+    pub(crate) cur_end: *mut u8,
     /// Highest block index ever reached — used by `reset()` to iterate only
     /// the blocks that were actually touched, instead of all retained blocks.
     high_water_mark: usize,
@@ -216,6 +219,7 @@ impl Arena {
             _drop_registry: (),
             cur_base: base,
             cur_ptr: base,
+            cur_end: unsafe { base.add(size) },
             high_water_mark: 0,
             largest_remaining: 0,
         }
@@ -360,6 +364,22 @@ impl Arena {
         if s.is_empty() {
             return "";
         }
+        // align=1, so cur_ptr needs no adjustment - dedicated fast path
+        let ptr_val = self.cur_ptr as usize;
+        let new_end = ptr_val + s.len();
+        if new_end <= self.cur_end as usize {
+            let ptr = self.cur_ptr;
+            self.cur_ptr = new_end as *mut u8;
+            unsafe {
+                std::ptr::copy_nonoverlapping(s.as_ptr(), ptr, s.len());
+                return std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, s.len()));
+            }
+        }
+        self.alloc_slow_str(s)
+    }
+
+    #[cold]
+    fn alloc_slow_str(&mut self, s: &str) -> &str {
         let ptr = self.alloc_raw_inner(s.len(), 1);
         unsafe {
             std::ptr::copy_nonoverlapping(s.as_ptr(), ptr.as_ptr(), s.len());
@@ -736,7 +756,7 @@ impl Arena {
         for i in (cp.block_idx + 1)..=self.current {
             self.blocks.get_mut(i).offset = 0;
         }
-        self.blocks[cp.block_idx].offset = cp.offset;
+        self.blocks.get_mut(cp.block_idx).offset = cp.offset;
         self.bytes_allocated = cp.bytes_allocated - cp.offset;
         self.set_current_block(cp.block_idx);
     }
@@ -767,8 +787,25 @@ impl Arena {
         }
         self.high_water_mark = 0;
         self.bytes_allocated = 0;
-        self.largest_remaining = 0;
-        self.set_current_block(0);
+        // Set block 0 directly without recomputing largest_remaining via set_current_block
+        let b0 = self.blocks.get(0);
+        self.current = 0;
+        self.cur_base = b0.base;
+        self.cur_ptr = b0.base;
+        self.cur_end = unsafe { b0.base.add(b0.capacity) };
+        // largest_remaining = max capacity among retained blocks (compute once)
+        self.largest_remaining = if self.blocks.len() > 1 {
+            let mut max_rem = 0;
+            for i in 1..self.blocks.len() {
+                let cap = self.blocks.get(i).capacity;
+                if cap > max_rem {
+                    max_rem = cap;
+                }
+            }
+            max_rem
+        } else {
+            0
+        };
     }
 }
 
@@ -970,13 +1007,12 @@ impl Arena {
         if align > MIN_BLOCK_ALIGN {
             return self.alloc_slow(size, align);
         }
-        let cur_offset = self.cur_ptr as usize - self.cur_base as usize;
-        let aligned_offset = align_up(cur_offset, align);
-        let new_offset = aligned_offset.saturating_add(size);
-        if new_offset <= self.blocks[self.current].capacity {
-            let ptr = unsafe { self.cur_base.add(aligned_offset) };
-            self.cur_ptr = unsafe { self.cur_base.add(new_offset) };
-            return unsafe { NonNull::new_unchecked(ptr) };
+        let ptr_val = self.cur_ptr as usize;
+        let aligned = align_up(ptr_val, align);
+        let new_ptr = aligned.wrapping_add(size);
+        if new_ptr <= self.cur_end as usize {
+            self.cur_ptr = new_ptr as *mut u8;
+            return unsafe { NonNull::new_unchecked(aligned as *mut u8) };
         }
         self.alloc_slow(size, align)
     }
@@ -988,13 +1024,12 @@ impl Arena {
         if align > MIN_BLOCK_ALIGN {
             return self.alloc_slow_try(size, align);
         }
-        let cur_offset = self.cur_ptr as usize - self.cur_base as usize;
-        let aligned_offset = align_up(cur_offset, align);
-        let new_offset = aligned_offset.checked_add(size)?;
-        if new_offset <= self.blocks[self.current].capacity {
-            let ptr = unsafe { self.cur_base.add(aligned_offset) };
-            self.cur_ptr = unsafe { self.cur_base.add(new_offset) };
-            return Some(unsafe { NonNull::new_unchecked(ptr) });
+        let ptr_val = self.cur_ptr as usize;
+        let aligned = align_up(ptr_val, align);
+        let new_ptr = aligned.checked_add(size)?;
+        if new_ptr <= self.cur_end as usize {
+            self.cur_ptr = new_ptr as *mut u8;
+            return Some(unsafe { NonNull::new_unchecked(aligned as *mut u8) });
         }
         self.alloc_slow_try(size, align)
     }
@@ -1012,7 +1047,7 @@ impl Arena {
         // Skip block scan entirely when no retained block has enough free space.
         if size <= self.largest_remaining {
             for i in (self.current + 1)..self.blocks.len() {
-                let block = &mut self.blocks[i];
+                let block = self.blocks.get_mut(i);
                 if block.align >= align {
                     if let Some((ptr, delta)) = block.try_alloc(size, align) {
                         self.bytes_allocated += delta;
@@ -1039,7 +1074,7 @@ impl Arena {
         // Skip block scan entirely when no retained block has enough free space.
         if size <= self.largest_remaining {
             for i in (self.current + 1)..self.blocks.len() {
-                let block = &mut self.blocks[i];
+                let block = self.blocks.get_mut(i);
                 if block.align >= align {
                     if let Some((ptr, delta)) = block.try_alloc(size, align) {
                         self.bytes_allocated += delta;
@@ -1057,7 +1092,7 @@ impl Arena {
     #[inline]
     fn finish_slow_path(&mut self, _size: usize, _align: usize) {
         self.bytes_allocated += self.cur_ptr as usize - self.cur_base as usize;
-        self.blocks[self.current].offset = self.cur_ptr as usize - self.cur_base as usize;
+        self.blocks.get_mut(self.current).offset = self.cur_ptr as usize - self.cur_base as usize;
     }
 
     /// Allocate a new block (infallible). Panics if allocation fails.
@@ -1098,6 +1133,7 @@ impl Arena {
         }
         self.cur_base = block.base;
         self.cur_ptr = unsafe { block.base.add(block.offset) };
+        self.cur_end = unsafe { block.base.add(block.capacity) };
         self.largest_remaining = self.compute_largest_remaining(idx);
     }
 
