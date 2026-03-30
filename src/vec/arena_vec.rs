@@ -489,16 +489,12 @@ impl<'arena, T> ArenaVec<'arena, T> {
         let elem_size = mem::size_of::<T>();
 
         // In-place extension: if our tail == arena's cur_ptr, just bump forward.
-        if self.cap > 0 {
-            let our_end = (self.ptr.as_ptr() as usize) + self.cap * elem_size;
-            if our_end == self.arena.cur_ptr as usize && new_cap > self.cap {
-                let extra_bytes = (new_cap - self.cap) * elem_size;
-                let new_end = our_end + extra_bytes;
-                if new_end <= self.arena.cur_end as usize {
-                    self.arena.cur_ptr = new_end as *mut u8;
-                    self.cap = new_cap;
-                    return Ok(());
-                }
+        if self.cap > 0 && new_cap > self.cap {
+            let extra_bytes = (new_cap - self.cap) * elem_size;
+            if unsafe { self.arena.cur_ptr.add(extra_bytes) <= self.arena.cur_end } {
+                self.arena.cur_ptr = unsafe { self.arena.cur_ptr.add(extra_bytes) };
+                self.cap = new_cap;
+                return Ok(());
             }
         }
 
@@ -684,16 +680,12 @@ impl<'arena, T> ArenaVec<'arena, T> {
         let elem_size = mem::size_of::<T>();
 
         // In-place extension: if our tail == arena's cur_ptr, just bump forward.
-        if self.cap > 0 {
-            let our_end = (self.ptr.as_ptr() as usize) + self.cap * elem_size;
-            if our_end == self.arena.cur_ptr as usize && new_cap > self.cap {
-                let extra_bytes = (new_cap - self.cap) * elem_size;
-                let new_end = our_end + extra_bytes;
-                if new_end <= self.arena.cur_end as usize {
-                    self.arena.cur_ptr = new_end as *mut u8;
-                    self.cap = new_cap;
-                    return;
-                }
+        if self.cap > 0 && new_cap > self.cap {
+            let extra_bytes = (new_cap - self.cap) * elem_size;
+            if unsafe { self.arena.cur_ptr.add(extra_bytes) <= self.arena.cur_end } {
+                self.arena.cur_ptr = unsafe { self.arena.cur_ptr.add(extra_bytes) };
+                self.cap = new_cap;
+                return;
             }
         }
 
