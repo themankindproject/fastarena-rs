@@ -490,11 +490,15 @@ impl<'arena, T> ArenaVec<'arena, T> {
 
         // In-place extension: if our tail == arena's cur_ptr, just bump forward.
         if self.cap > 0 && new_cap > self.cap {
-            let extra_bytes = (new_cap - self.cap) * elem_size;
-            if unsafe { self.arena.cur_ptr.add(extra_bytes) <= self.arena.cur_end } {
-                self.arena.cur_ptr = unsafe { self.arena.cur_ptr.add(extra_bytes) };
-                self.cap = new_cap;
-                return Ok(());
+            let our_end = self.ptr.as_ptr().wrapping_add(self.cap) as *mut u8;
+            if our_end == self.arena.cur_ptr {
+                let extra_bytes = (new_cap - self.cap) * elem_size;
+                let new_end = our_end.wrapping_add(extra_bytes);
+                if new_end <= self.arena.cur_end {
+                    self.arena.cur_ptr = new_end;
+                    self.cap = new_cap;
+                    return Ok(());
+                }
             }
         }
 
@@ -681,11 +685,15 @@ impl<'arena, T> ArenaVec<'arena, T> {
 
         // In-place extension: if our tail == arena's cur_ptr, just bump forward.
         if self.cap > 0 && new_cap > self.cap {
-            let extra_bytes = (new_cap - self.cap) * elem_size;
-            if unsafe { self.arena.cur_ptr.add(extra_bytes) <= self.arena.cur_end } {
-                self.arena.cur_ptr = unsafe { self.arena.cur_ptr.add(extra_bytes) };
-                self.cap = new_cap;
-                return;
+            let our_end = self.ptr.as_ptr().wrapping_add(self.cap) as *mut u8;
+            if our_end == self.arena.cur_ptr {
+                let extra_bytes = (new_cap - self.cap) * elem_size;
+                let new_end = our_end.wrapping_add(extra_bytes);
+                if new_end <= self.arena.cur_end {
+                    self.arena.cur_ptr = new_end;
+                    self.cap = new_cap;
+                    return;
+                }
             }
         }
 
