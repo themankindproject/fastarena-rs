@@ -1,3 +1,4 @@
+use bumpalo::Bump;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use fastarena::{Arena, ArenaVec};
 use std::hint::black_box;
@@ -32,8 +33,9 @@ fn bench_alloc_slice(c: &mut Criterion) {
         g.throughput(Throughput::Elements(n as u64));
 
         g.bench_with_input(BenchmarkId::new("arena alloc_slice", n), &n, |b, &n| {
+            let mut a = Arena::with_capacity(n * 8 * 4);
             b.iter(|| {
-                let mut a = Arena::with_capacity(n * 8 * 4);
+                a.reset();
                 black_box(a.alloc_slice(0u32..n as u32));
             });
         });
@@ -56,8 +58,9 @@ fn bench_alloc_slice_copy(c: &mut Criterion) {
         let src: Vec<u32> = (0..n as u32).collect();
 
         g.bench_with_input(BenchmarkId::new("arena alloc_slice_copy", n), &n, |b, _| {
+            let mut a = Arena::with_capacity(n * 8 * 4);
             b.iter(|| {
-                let mut a = Arena::with_capacity(n * 8 * 4);
+                a.reset();
                 black_box(a.alloc_slice_copy(black_box(&src)));
             });
         });
@@ -111,7 +114,7 @@ fn bench_reset(c: &mut Criterion) {
 
     for blocks in [1usize, 4, 8] {
         g.bench_with_input(
-            BenchmarkId::new("reset", format!("{blocks} blocks")),
+            BenchmarkId::new("fastarena", format!("{blocks} blocks")),
             &blocks,
             |b, &blocks| {
                 b.iter(|| {
@@ -124,6 +127,24 @@ fn bench_reset(c: &mut Criterion) {
                         let _ = a.alloc(black_box(0u64));
                     }
                     a.reset();
+                });
+            },
+        );
+
+        g.bench_with_input(
+            BenchmarkId::new("bumpalo", format!("{blocks} blocks")),
+            &blocks,
+            |b, &blocks| {
+                b.iter(|| {
+                    let mut bump = Bump::with_capacity(64);
+                    for _ in 0..(blocks * 8) {
+                        let _ = bump.alloc(black_box(0u64));
+                    }
+                    bump.reset();
+                    for _ in 0..(blocks * 8) {
+                        let _ = bump.alloc(black_box(0u64));
+                    }
+                    bump.reset();
                 });
             },
         );

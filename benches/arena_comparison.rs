@@ -74,21 +74,25 @@ fn bench_string_comparison(c: &mut Criterion) {
     let mut g = c.benchmark_group("alloc_str x100");
     g.throughput(Throughput::Elements(100));
 
+    // Reuse one arena / bump per sample: 100 copies then reset — matches
+    // request-scoped “many short strings per cycle” without `Block::new` each iter.
     g.bench_function("fastarena", |b| {
+        let mut a = Arena::with_capacity(1024);
         b.iter(|| {
-            let mut a = Arena::with_capacity(1024);
             for _ in 0..100 {
                 black_box(a.alloc_str("hello world this is a test string"));
             }
+            a.reset();
         });
     });
 
     g.bench_function("bumpalo", |b| {
+        let mut bump = Bump::with_capacity(1024);
         b.iter(|| {
-            let a = Bump::with_capacity(1024);
             for _ in 0..100 {
-                black_box(a.alloc_str("hello world this is a test string"));
+                black_box(bump.alloc_str("hello world this is a test string"));
             }
+            bump.reset();
         });
     });
 
