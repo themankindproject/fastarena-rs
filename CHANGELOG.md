@@ -9,6 +9,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Performance
 
+- **Bump fast path tuning** — `Arena::try_alloc_str` uses the same align-1 bump path as `alloc_str`; `alloc_raw_inner` / `try_alloc_raw_inner` use `align_up` + `ptr::add` (aligned with `Block::try_alloc`, preserves provenance). README benchmark tables refreshed from `cargo bench --bench arena_comparison --bench arena_bench -- --quick`.
+- **Bench: `alloc_slice` fairness** — `arena_bench` reuses one arena and calls `reset()` each iteration so samples measure slice fill + bump rather than `Arena::with_capacity` + `Block::new` every time.
+- **Bench: perf methodology** — `alloc_slice_copy` matches that reuse + `reset()` pattern; `alloc_str` ×100 compares fastarena vs bumpalo with one arena / bump and `reset()` each sample; `reset/*` includes paired **bumpalo** runs (same alloc + `reset` pattern) for apples-to-apples. README documents `cargo bench` / `--quick` / filtered runs.
 - **`alloc` speedup ~51%** — Cached `cur_end` pointer eliminates per-allocation bounds check and 2 pointer operations (block array access). Benchmark: 1.8µs → 875ns for 1000 u64 allocations.
 - **`alloc_str` fast path** — Dedicated fast path for align=1 case, avoiding alignment computation.
 - **`write_slice_bulk` simplification** — Removed 256-byte stack buffer, writes directly to destination.

@@ -1,7 +1,7 @@
 use std::mem::{self, MaybeUninit};
 use std::ptr::NonNull;
 
-use super::block::{Block, MIN_BLOCK_ALIGN};
+use super::block::{align_up, Block, MIN_BLOCK_ALIGN};
 use super::boxed::ArenaBox;
 use super::stats::ArenaStats;
 use crate::util::{
@@ -571,12 +571,29 @@ impl Arena {
     /// let s = arena.try_alloc_str("hello");
     /// assert_eq!(s, Some("hello"));
     /// ```
-    #[inline]
+    #[inline(always)]
     #[must_use]
     pub fn try_alloc_str(&mut self, s: &str) -> Option<&str> {
         if s.is_empty() {
             return Some("");
         }
+        // Same bump fast path as [`alloc_str`](Self::alloc_str); align = 1.
+        let new_end = (self.cur_ptr as usize).checked_add(s.len())?;
+        if new_end <= self.cur_end as usize {
+            let ptr = self.cur_ptr;
+            self.cur_ptr = unsafe { self.cur_ptr.add(s.len()) };
+            unsafe {
+                core::ptr::copy_nonoverlapping(s.as_ptr(), ptr, s.len());
+                return Some(core::str::from_utf8_unchecked(core::slice::from_raw_parts(
+                    ptr, s.len(),
+                )));
+            }
+        }
+        self.try_alloc_slow_str(s)
+    }
+
+    #[cold]
+    fn try_alloc_slow_str(&mut self, s: &str) -> Option<&str> {
         let ptr = self.try_alloc_raw_inner(s.len(), 1)?;
         unsafe {
             core::ptr::copy_nonoverlapping(s.as_ptr(), ptr.as_ptr(), s.len());
@@ -995,16 +1012,23 @@ impl Arena {
     }
 
     /// Fast-path allocation: tries the current block, falls back to `alloc_slow`.
+    ///
+    /// Uses the same `align_up` address math as [`Block::try_alloc`](super::block::Block::try_alloc)
+    /// instead of `align_offset`, which tends to codegen a little tighter on common targets.
     #[inline(always)]
     pub(crate) fn alloc_raw_inner(&mut self, size: usize, align: usize) -> NonNull<u8> {
         // For high-alignment requests, always use slow path to allocate a fresh block.
         if align > MIN_BLOCK_ALIGN {
             return self.alloc_slow(size, align);
         }
-        let offset = self.cur_ptr.align_offset(align);
-        // Use wrapping to check bounds without UB
-        let new_ptr = self.cur_ptr.wrapping_add(offset).wrapping_add(size);
-        if new_ptr <= self.cur_end {
+        let cur = self.cur_ptr as usize;
+        let end = self.cur_end as usize;
+        let aligned = align_up(cur, align);
+        let Some(new_end) = aligned.checked_add(size) else {
+            return self.alloc_slow(size, align);
+        };
+        if new_end <= end {
+            let offset = aligned - cur;
             let aligned_ptr = unsafe { self.cur_ptr.add(offset) };
             self.cur_ptr = unsafe { aligned_ptr.add(size) };
             return unsafe { NonNull::new_unchecked(aligned_ptr) };
@@ -1019,10 +1043,12 @@ impl Arena {
         if align > MIN_BLOCK_ALIGN {
             return self.alloc_slow_try(size, align);
         }
-        let offset = self.cur_ptr.align_offset(align);
-        // Use wrapping to check bounds without UB
-        let new_ptr = self.cur_ptr.wrapping_add(offset).wrapping_add(size);
-        if new_ptr <= self.cur_end {
+        let cur = self.cur_ptr as usize;
+        let end = self.cur_end as usize;
+        let aligned = align_up(cur, align);
+        let new_end = aligned.checked_add(size)?;
+        if new_end <= end {
+            let offset = aligned - cur;
             let aligned_ptr = unsafe { self.cur_ptr.add(offset) };
             self.cur_ptr = unsafe { aligned_ptr.add(size) };
             return Some(unsafe { NonNull::new_unchecked(aligned_ptr) });

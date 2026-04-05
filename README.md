@@ -193,44 +193,68 @@ See [USAGE.md](USAGE.md) for full examples.
 
 ## Performance
 
+Medians below mix a **fresh** Criterion `--quick` sweep (Linux x86-64) with earlier full runs; re-measure before publishing release notes. Absolute timings vary by CPU, frequency, and Rust version.
+
+### Reproducing benchmarks
+
+```bash
+# Full comparison + in-crate benches (slow)
+cargo bench --bench arena_comparison --bench arena_bench
+
+# Shorter iteration (Criterion)
+cargo bench --bench arena_comparison --bench arena_bench -- --quick
+
+# Examples: filter by substring
+cargo bench --bench arena_bench reset -- --quick
+cargo bench --bench arena_comparison alloc_str -- --quick
+```
+
 ### Head-to-head: fastarena vs bumpalo vs typed-arena
 
 | Benchmark | fastarena | bumpalo | typed-arena |
 |-----------|-----------|---------|-------------|
-| alloc 1k items | **894 ns** | 937 ns | 1072 ns |
-| alloc_slice n=64 | **10 ns** | 53 ns | 84 ns |
-| alloc_slice n=1024 | **64 ns** | 518 ns | — |
-| alloc_str (100x) | 202 ns | **190 ns** | — |
-| ArenaVec n=16 | **30 ns** | 42 ns | 34 ns |
-| ArenaVec n=256 | **263 ns** | 346 ns | 516 ns |
-| ArenaVec n=4096 | **3.4 µs** | 8.5 µs | 11.1 µs |
-| 10k allocs + reset | **15.0 µs** | 15.1 µs | 2.8 µs† |
-| reset (1 block) | **20 ns** | 696 ns | — |
-| reset (4 blocks) | **167 ns** | — | — |
-| 128 KB alloc | 63 ns | **27 ns** | — |
+| alloc 1k items | **995 ns** | 1162 ns | 1779 ns |
+| alloc_slice n=64 ‡ | **58 ns** | 68 ns | 93 ns |
+| alloc_slice n=1024 ‡ | **124 ns** | 562 ns | — |
+| alloc_str (100×) § | 163 ns | **151 ns** | — |
+| ArenaVec n=16 | 51 ns | 60 ns | **27 ns** |
+| ArenaVec n=256 | 510 ns | 418 ns | **393 ns** |
+| ArenaVec n=4096 | **2.9 µs** | 9.3 µs | 14.1 µs |
+| 10k allocs + reset | **14.4 µs** | 14.8 µs | 3.1 µs† |
+| reset (1 block) ※ | **25 ns** | 35 ns | — |
+| reset (4 blocks) ※ | 175 ns | **72 ns** | — |
+| reset (8 blocks) ※ | 376 ns | **214 ns** | — |
+| 128 KB alloc | 116 ns | **53 ns** | — |
 
-† typed-arena drops and re-creates the arena each iteration; not directly comparable.
+† typed-arena benchmark allocates once per fresh arena in a tight loop; not directly comparable to reset + reuse.
+
+‡ `alloc_slice` / `alloc_slice_copy` in `arena_bench`: one arena per benchmark, `reset()` each iteration (measures fill + bump, not `Block::new` per sample).
+
+§ `alloc_str` ×100: one arena / bump per benchmark, **100 copies then `reset()`** each iteration (request-style reuse).
+
+※ `arena_bench` `reset/*`: `Arena::with_capacity(64)` / matching bump capacity, two bursts of `blocks × 8` × `u64` allocs separated by `reset()` (workload-dependent; bumpalo can be faster once multiple chunks are involved).
 
 ### Fast path benchmarks (vs std Box/Vec)
 
 | Benchmark | fastarena | Box/Vec | Speedup |
 |-----------|-----------|---------|---------|
-| alloc 1k u64 | **864 ns** | 15732 ns | **18x** |
-| alloc_slice n=512 | **59 ns** | 65 ns | ~1x |
-| alloc_slice n=4096 | **246 ns** | 236 ns | ~1x |
-| 10k allocs + reset | **15.5 µs** | 211.8 µs | **14x** |
-| `Arena::new` | **22 ns** | — | — |
-| `checkpoint()` | **93 ns** | — | — |
-| `reset` 1 block | **20 ns** | — | — |
-| `commit` 16 allocs | **1.3 µs** | — | — |
+| alloc 1k u64 | **1050 ns** | 52.8 µs | **~50×** |
+| alloc_slice n=512 ‡ | **62 ns** | 74 ns | ~1.2× |
+| alloc_slice n=4096 ‡ | **231 ns** | 463 ns | ~2× |
+| 10k allocs + reset | **24.9 µs** | 336 µs | **~13×** |
+| `Arena::new` | **55.7 ns** | — | — |
+| `checkpoint()` | **204 ns** | — | — |
+| `reset` 1 block ※ | **25 ns** | 35 ns | — |
+| `commit` 16 allocs | **1.69 µs** | — | — |
 
 ### Why fastarena excels
 
-- **5-8x faster slice allocation** than bumpalo (batch write in tight loop)
-- **2-3x faster ArenaVec** than bumpalo/typed-arena for bulk collection building
-- **Tied on alloc** — on par with bumpalo for single-item allocation
-- **14x faster than Box** for bulk alloc + reclaim cycles
-- **35x faster reset** than bumpalo for single-block arenas (O(peak) block reuse)
+- **~4–5× faster `alloc_slice` than bumpalo** at n=1024 in these benchmarks (batch fill into arena memory)
+- **`ArenaVec`** — faster than bumpalo for larger n (e.g. n=4096); typed-arena can win when n is small (and in this run, up through n=256) where its pattern dominates
+- **Scalar `alloc`** — competitive with bumpalo (~995 ns vs ~1162 ns for 1k× u64 here)
+- **`alloc_str` (hot loop)** — within ~10% of bumpalo when reusing one arena and `reset()` per batch (§)
+- **~50× faster than `Box`** for 1k allocs + arena `reset` vs 1k `Box::new` + drop (see `arena_bench`)
+- **`reset`** — on the `arena_bench` micro-workload, single-chunk reuse favors fastarena; multi-chunk `reset` can favor bumpalo (※) — always profile your own allocation pattern
 - **Zero dependencies**: No external crates required
 
 ## Feature Flags

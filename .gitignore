@@ -35,6 +35,7 @@ tarpaulin-report.html
 
 # Benchmark results
 criterion/
+perf_run.txt
 
 # Temporary files
 *.tmp
