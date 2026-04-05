@@ -585,7 +585,8 @@ impl Arena {
             unsafe {
                 core::ptr::copy_nonoverlapping(s.as_ptr(), ptr, s.len());
                 return Some(core::str::from_utf8_unchecked(core::slice::from_raw_parts(
-                    ptr, s.len(),
+                    ptr,
+                    s.len(),
                 )));
             }
         }
